@@ -1,0 +1,16 @@
+services:
+  karaokequeue:
+    image: ${KQ_IMAGE:-parabyte-ca/karaokequeue}:${KQ_TAG:-latest}
+    build:
+      context: .
+    container_name: karaokequeue
+    restart: unless-stopped
+    user: "${PUID:-568}:${PGID:-568}"
+    env_file:
+      - .env
+    environment:
+      DATA_PATH: /data
+    ports:
+      - "${KQ_PORT:-8095}:8000"
+    volumes:
+      - ${KQ_DATA_DIR:-./data}:/data

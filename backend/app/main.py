@@ -1,0 +1,520 @@
+"""FastAPI application: REST API, WebSockets, background ticker and the built SPA."""
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+from pathlib import Path
+from typing import Any, Callable
+
+import segno
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from . import auth
+from .config import Settings
+from .db import Database
+from .engine import Engine, EngineError
+from .ratelimit import RateLimiter
+from .ws import Client, Hub
+from .youtube import SearchUnavailable, YouTubeService
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("karaokequeue")
+
+
+# --------------------------------------------------------------------------- request models
+
+class JoinIn(BaseModel):
+    code: str = Field(min_length=3, max_length=10)
+    name: str = Field(min_length=1, max_length=40)
+
+
+class QueueIn(BaseModel):
+    video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
+    title: str | None = Field(default=None, max_length=300)
+    channel: str | None = Field(default=None, max_length=200)
+    thumbnail: str | None = Field(default=None, max_length=500)
+
+
+class PinIn(BaseModel):
+    pin: str = Field(min_length=1, max_length=64)
+
+
+class PinChangeIn(BaseModel):
+    current: str = Field(min_length=1, max_length=64)
+    new: str = Field(min_length=4, max_length=64)
+
+
+class EventIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    config: dict[str, Any] | None = None
+
+
+class EventPatch(BaseModel):
+    name: str | None = Field(default=None, max_length=80)
+    config: dict[str, Any] | None = None
+
+
+class ThemeIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    description: str | None = Field(default="", max_length=280)
+    weight: float | None = Field(default=1, ge=0, le=100)
+    enabled: bool = True
+
+
+class MoveIn(BaseModel):
+    index: int = Field(ge=0, le=10000)
+
+
+class ReorderIn(BaseModel):
+    ids: list[int] = Field(max_length=1000)
+
+
+class PlayerIn(BaseModel):
+    item_id: int
+    state: str = Field(pattern=r"^(ended|error)$")
+    code: int | None = None
+
+
+EVENT_ACTIONS: dict[str, str] = {
+    "start": "start_event", "end": "end_event", "pause": "pause_rotation", "resume": "resume_rotation",
+    "skip-turn": "skip_turn", "spin": "force_spin", "superset-force": "force_superset",
+    "superset-cancel": "cancel_superset", "play-next": "play_next", "skip-song": "skip_song",
+    "stop-playback": "stop_playback",
+}
+
+
+# --------------------------------------------------------------------------- app factory
+
+def create_app(settings: Settings | None = None, start_ticker: bool = True,
+               youtube: YouTubeService | None = None) -> FastAPI:
+    settings = settings or Settings()
+    settings.ensure()
+    db = Database(settings.db_path)
+    engine = Engine(db)
+    engine.seed_themes()
+    auth.init_pin(db, settings.host_pin)
+    yt = youtube or YouTubeService(db, settings.youtube_api_key, settings.youtube_daily_quota, settings.enable_ytdlp)
+    hub = Hub()
+    lock = asyncio.Lock()
+    limits = {
+        "search_guest": RateLimiter(10, 60), "search_ip": RateLimiter(60, 60),
+        "join": RateLimiter(15, 60), "login": RateLimiter(8, 60), "queue": RateLimiter(10, 60),
+    }
+
+    async def broadcast(messages: list[dict], extra_events: set[int] = frozenset()) -> None:
+        event_ids = {m["event_id"] for m in messages} | set(extra_events)
+        for m in messages:
+            await hub.send(m["event_id"], m["message"], m["guest_id"])
+        for eid in event_ids:
+            if hub.count(eid):
+                async with lock:
+                    try:
+                        snap = engine.snapshot(eid)
+                    except EngineError:
+                        continue
+                await hub.send(eid, {"type": "state", "data": snap})
+
+    async def run(fn: Callable, *args, event_id: int | None = None):
+        async with lock:
+            try:
+                result = fn(*args)
+            except EngineError as exc:
+                engine.drain()
+                raise HTTPException(exc.status, exc.message) from exc
+            messages = engine.drain()
+        await broadcast(messages, {event_id} if event_id else set())
+        return result
+
+    async def ticker():
+        purge_at = 0.0
+        while True:
+            await asyncio.sleep(0.5)
+            try:
+                async with lock:
+                    engine.tick()
+                    messages = engine.drain()
+                if messages:
+                    await broadcast(messages)
+                loop_time = asyncio.get_running_loop().time()
+                if loop_time > purge_at:
+                    yt.purge_cache()
+                    purge_at = loop_time + 3600
+            except Exception:  # keep the ticker alive no matter what
+                log.exception("Ticker error")
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        task = asyncio.create_task(ticker()) if start_ticker else None
+        log.info("KaraokeQueue v%s ready. Data: %s. Search mode: %s", settings.version, settings.data_path,
+                 yt.quota_status()["mode"])
+        yield
+        if task:
+            task.cancel()
+        await yt.aclose()
+        db.close()
+
+    app = FastAPI(title="KaraokeQueue", version=settings.version, lifespan=lifespan,
+                  docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.engine, app.state.db, app.state.settings, app.state.hub = engine, db, settings, hub
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        resp = await call_next(request)
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        if request.url.path.startswith("/api/"):
+            resp.headers.setdefault("Cache-Control", "no-store")
+        return resp
+
+    # ------------------------------------------------------------------ helpers
+
+    def client_ip(request: Request) -> str:
+        return request.client.host if request.client else "unknown"
+
+    def limit(name: str, key: str) -> None:
+        lim = limits[name]
+        if not lim.allow(key):
+            raise HTTPException(429, f"Slow down a little. Try again in {lim.retry_after(key)} seconds.")
+
+    def require_host(request: Request) -> None:
+        if not auth.check_session(settings.secret_key, request.cookies.get(auth.COOKIE_NAME)):
+            raise HTTPException(401, "Host login required")
+
+    def current_guest(request: Request) -> dict:
+        header = request.headers.get("authorization", "")
+        token = header[7:] if header.lower().startswith("bearer ") else ""
+        try:
+            return engine.guest_by_token(token)
+        except EngineError as exc:
+            raise HTTPException(exc.status, exc.message) from exc
+
+    def base_url(request: Request) -> str:
+        return settings.public_base_url or str(request.base_url).rstrip("/")
+
+    def get_event_or_404(event_id: int) -> dict:
+        try:
+            return engine.get_event(event_id)
+        except EngineError as exc:
+            raise HTTPException(exc.status, exc.message) from exc
+
+    # ------------------------------------------------------------------ public
+
+    @app.get("/api/health")
+    async def health():
+        return {"status": "ok", "version": settings.version}
+
+    @app.get("/api/public/events/{code}")
+    async def public_event(code: str):
+        try:
+            ev = engine.event_by_code(code)
+        except EngineError as exc:
+            raise HTTPException(exc.status, exc.message) from exc
+        return {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"], "status": ev["status"]}
+
+    @app.get("/api/public/join-url")
+    async def join_url(request: Request, code: str):
+        return {"url": f"{base_url(request)}/join/{code.strip().upper()}"}
+
+    @app.get("/api/public/qr.svg")
+    async def qr(request: Request, code: str):
+        if not code.isalnum() or len(code) > 10:
+            raise HTTPException(400, "Invalid code")
+        url = f"{base_url(request)}/join/{code.upper()}"
+        buf = segno.make(url, error="m")
+        import io
+        out = io.BytesIO()
+        buf.save(out, kind="svg", scale=10, border=2, dark="#000000", light="#ffffff")
+        return Response(out.getvalue(), media_type="image/svg+xml")
+
+    # ------------------------------------------------------------------ guest
+
+    @app.post("/api/guest/join")
+    async def guest_join(body: JoinIn, request: Request):
+        limit("join", client_ip(request))
+        try:
+            ev = engine.event_by_code(body.code)
+        except EngineError as exc:
+            raise HTTPException(exc.status, exc.message) from exc
+        guest, token = await run(engine.join, ev["id"], body.name, event_id=ev["id"])
+        return {"token": token, "guest": {"id": guest["id"], "name": guest["display_name"]},
+                "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"]}}
+
+    @app.get("/api/guest/me")
+    async def guest_me(guest: dict = Depends(current_guest)):
+        ev = engine.get_event(guest["event_id"])
+        return {"guest": {"id": guest["id"], "name": guest["display_name"]},
+                "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"], "status": ev["status"]}}
+
+    @app.get("/api/guest/state")
+    async def guest_state(guest: dict = Depends(current_guest)):
+        async with lock:
+            return engine.snapshot(guest["event_id"])
+
+    @app.post("/api/guest/leave")
+    async def guest_leave(guest: dict = Depends(current_guest)):
+        await run(engine.leave, guest["id"], event_id=guest["event_id"])
+        return {"ok": True}
+
+    @app.get("/api/guest/search")
+    async def guest_search(request: Request, q: str = "", guest: dict = Depends(current_guest)):
+        q = q.strip()
+        if not 1 <= len(q) <= 100:
+            raise HTTPException(422, "Search must be 1 to 100 characters")
+        limit("search_guest", f"g{guest['id']}")
+        limit("search_ip", client_ip(request))
+        ev = engine.get_event(guest["event_id"])
+        try:
+            return await yt.search(q, ev["config"]["safe_search"])
+        except SearchUnavailable as exc:
+            raise HTTPException(503, str(exc)) from exc
+
+    @app.post("/api/guest/queue")
+    async def guest_queue(body: QueueIn, guest: dict = Depends(current_guest)):
+        limit("queue", f"g{guest['id']}")
+        info = await yt.verify(body.video_id)
+        if info is None:
+            raise HTTPException(404, "That video isn't available on YouTube.")
+        if not info.get("embeddable", True) or info.get("live"):
+            raise HTTPException(422, "That video can't be played here (embedding is turned off). Pick another!")
+        video = {
+            "video_id": body.video_id,
+            "title": info.get("title") or (body.title or "").strip() or "Untitled",
+            "channel": info.get("channel") or (body.channel or "").strip(),
+            "thumbnail": info.get("thumbnail") or f"https://i.ytimg.com/vi/{body.video_id}/mqdefault.jpg",
+            "duration_s": info.get("duration_s"),
+        }
+        item = await run(engine.queue_song, guest["id"], video, event_id=guest["event_id"])
+        return {"ok": True, "item_id": item["id"]}
+
+    @app.delete("/api/guest/queue/{item_id}")
+    async def guest_remove(item_id: int, guest: dict = Depends(current_guest)):
+        await run(engine.remove_item, guest["event_id"], item_id, guest["id"], event_id=guest["event_id"])
+        return {"ok": True}
+
+    @app.post("/api/guest/flag/{item_id}")
+    async def guest_flag(item_id: int, guest: dict = Depends(current_guest)):
+        count = await run(engine.flag_item, guest["event_id"], item_id, f"guest:{guest['id']}",
+                          event_id=guest["event_id"])
+        return {"ok": True, "count": count}
+
+    # ------------------------------------------------------------------ host auth
+
+    @app.post("/api/host/login")
+    async def host_login(body: PinIn, request: Request, response: Response):
+        limit("login", client_ip(request))
+        if not auth.verify_pin(body.pin.strip(), db.get_setting("host_pin_hash", "")):
+            raise HTTPException(401, "That PIN didn't match.")
+        secure = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+        response.set_cookie(auth.COOKIE_NAME, auth.make_session(settings.secret_key), max_age=auth.SESSION_SECONDS,
+                            httponly=True, samesite="lax", secure=secure, path="/")
+        return {"ok": True}
+
+    @app.post("/api/host/logout")
+    async def host_logout(response: Response):
+        response.delete_cookie(auth.COOKIE_NAME, path="/")
+        return {"ok": True}
+
+    @app.get("/api/host/session")
+    async def host_session(request: Request):
+        return {"authenticated": auth.check_session(settings.secret_key, request.cookies.get(auth.COOKIE_NAME)),
+                "pin_from_env": bool(db.get_setting("host_pin_from_env")), "version": settings.version}
+
+    @app.post("/api/host/pin", dependencies=[Depends(require_host)])
+    async def host_pin(body: PinChangeIn):
+        if db.get_setting("host_pin_from_env"):
+            raise HTTPException(409, "The PIN is set by HOST_PIN in your .env file. Change it there.")
+        if not auth.verify_pin(body.current.strip(), db.get_setting("host_pin_hash", "")):
+            raise HTTPException(401, "Current PIN is incorrect.")
+        try:
+            db.set_setting("host_pin_hash", auth.hash_pin(auth.validate_pin(body.new)))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"ok": True}
+
+    # ------------------------------------------------------------------ host: events
+
+    host = [Depends(require_host)]
+
+    @app.get("/api/host/events", dependencies=host)
+    async def list_events():
+        return engine.list_events()
+
+    @app.post("/api/host/events", dependencies=host)
+    async def create_event(body: EventIn):
+        ev = await run(engine.create_event, body.name, body.config)
+        return {"id": ev["id"], "join_code": ev["join_code"]}
+
+    @app.get("/api/host/events/{event_id}/state", dependencies=host)
+    async def event_state(event_id: int):
+        get_event_or_404(event_id)
+        async with lock:
+            return engine.snapshot(event_id)
+
+    @app.patch("/api/host/events/{event_id}", dependencies=host)
+    async def patch_event(event_id: int, body: EventPatch):
+        await run(engine.update_event, event_id, body.name, body.config, event_id=event_id)
+        return {"ok": True}
+
+    @app.delete("/api/host/events/{event_id}", dependencies=host)
+    async def delete_event(event_id: int):
+        await run(engine.delete_event, event_id)
+        return {"ok": True}
+
+    @app.post("/api/host/events/{event_id}/actions/{action}", dependencies=host)
+    async def event_action(event_id: int, action: str):
+        method = EVENT_ACTIONS.get(action)
+        if not method:
+            raise HTTPException(404, "Unknown action")
+        await run(getattr(engine, method), event_id, event_id=event_id)
+        return {"ok": True}
+
+    @app.post("/api/host/events/{event_id}/queue/reorder", dependencies=host)
+    async def reorder(event_id: int, body: ReorderIn):
+        await run(engine.reorder, event_id, body.ids, event_id=event_id)
+        return {"ok": True}
+
+    @app.post("/api/host/events/{event_id}/queue/{item_id}/move", dependencies=host)
+    async def move(event_id: int, item_id: int, body: MoveIn):
+        await run(engine.move_item, event_id, item_id, body.index, event_id=event_id)
+        return {"ok": True}
+
+    @app.delete("/api/host/events/{event_id}/queue/{item_id}", dependencies=host)
+    async def remove_item(event_id: int, item_id: int):
+        await run(engine.remove_item, event_id, item_id, event_id=event_id)
+        return {"ok": True}
+
+    @app.post("/api/host/events/{event_id}/queue/{item_id}/flag", dependencies=host)
+    async def host_flag(event_id: int, item_id: int):
+        count = await run(engine.flag_item, event_id, item_id, "host", event_id=event_id)
+        return {"ok": True, "count": count}
+
+    @app.post("/api/host/events/{event_id}/guests/{guest_id}/{action}", dependencies=host)
+    async def guest_action(event_id: int, guest_id: int, action: str):
+        g = db.one("SELECT event_id FROM guests WHERE id = ?", (guest_id,))
+        if not g or g["event_id"] != event_id:
+            raise HTTPException(404, "Guest not found")
+        fn = {"remove": engine.remove_guest, "skip": engine.skip_guest}.get(action)
+        if not fn:
+            raise HTTPException(404, "Unknown action")
+        await run(fn, guest_id, event_id=event_id)
+        return {"ok": True}
+
+    @app.post("/api/host/events/{event_id}/player", dependencies=host)
+    async def player(event_id: int, body: PlayerIn):
+        if body.state == "ended":
+            await run(engine.player_ended, event_id, body.item_id, event_id=event_id)
+        else:
+            await run(engine.player_error, event_id, body.item_id, int(body.code or 0), event_id=event_id)
+        return {"ok": True}
+
+    @app.get("/api/host/events/{event_id}/history.csv", dependencies=host)
+    async def history_csv(event_id: int):
+        ev = get_event_or_404(event_id)
+        safe = "".join(c if c.isalnum() else "-" for c in ev["name"]).strip("-")[:40] or "event"
+        return PlainTextResponse(engine.history_csv(event_id), media_type="text/csv",
+                                 headers={"Content-Disposition": f'attachment; filename="karaokequeue-{safe}.csv"'})
+
+    # ------------------------------------------------------------------ host: themes & quota
+
+    @app.get("/api/host/themes", dependencies=host)
+    async def themes():
+        return engine.list_themes()
+
+    @app.post("/api/host/themes", dependencies=host)
+    async def create_theme(body: ThemeIn):
+        return await run(engine.save_theme, body.model_dump())
+
+    @app.put("/api/host/themes/{theme_id}", dependencies=host)
+    async def update_theme(theme_id: int, body: ThemeIn):
+        return await run(engine.save_theme, body.model_dump(), theme_id)
+
+    @app.delete("/api/host/themes/{theme_id}", dependencies=host)
+    async def delete_theme(theme_id: int):
+        await run(engine.delete_theme, theme_id)
+        return {"ok": True}
+
+    @app.get("/api/host/quota", dependencies=host)
+    async def quota():
+        return yt.quota_status()
+
+    @app.get("/api/public/themes")
+    async def public_themes():
+        return [t["name"] for t in engine.list_themes() if t["enabled"]]
+
+    # ------------------------------------------------------------------ websocket
+
+    @app.websocket("/ws/{code}")
+    async def websocket(ws: WebSocket, code: str):
+        try:
+            ev = engine.event_by_code(code)
+        except EngineError:
+            await ws.close(code=4404)
+            return
+        token = ws.query_params.get("token")
+        if token:
+            try:
+                guest = engine.guest_by_token(token)
+            except EngineError:
+                await ws.close(code=4401)
+                return
+            if guest["event_id"] != ev["id"]:
+                await ws.close(code=4403)
+                return
+            client = Client(ws, "guest", guest["id"])
+        elif auth.check_session(settings.secret_key, ws.cookies.get(auth.COOKIE_NAME)):
+            client = Client(ws, "host")
+        else:
+            await ws.close(code=4401)
+            return
+        await ws.accept()
+        hub.add(ev["id"], client)
+        try:
+            async with lock:
+                snap = engine.snapshot(ev["id"])
+            async with client.lock:
+                await ws.send_json({"type": "state", "data": snap})
+            while True:
+                msg = await ws.receive_text()
+                if msg == "ping":
+                    async with client.lock:
+                        await ws.send_text('{"type":"pong"}')
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            hub.remove(ev["id"], client)
+
+    # ------------------------------------------------------------------ SPA
+
+    @app.exception_handler(404)
+    async def not_found(request: Request, exc):
+        if request.url.path.startswith(("/api/", "/ws/")):
+            detail = getattr(exc, "detail", "Not found")
+            return JSONResponse({"detail": detail}, status_code=404)
+        index = settings.static_dir / "index.html"
+        if index.exists():
+            return FileResponse(index)
+        return JSONResponse({"detail": "Frontend not built"}, status_code=404)
+
+    if (settings.static_dir / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=settings.static_dir / "assets"), name="assets")
+
+    @app.get("/")
+    async def root():
+        index = settings.static_dir / "index.html"
+        if index.exists():
+            return FileResponse(index)
+        return JSONResponse({"detail": "Frontend not built. API is at /api."})
+
+    for static_file in ("favicon.svg", "robots.txt"):
+        path: Path = settings.static_dir / static_file
+        if path.exists():
+            app.add_api_route(f"/{static_file}", (lambda p=path: FileResponse(p)), methods=["GET"])
+
+    return app
+
+
