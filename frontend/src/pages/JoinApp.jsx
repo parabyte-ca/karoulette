@@ -148,7 +148,7 @@ function GuestHome({ me, onLeave }) {
       case "song_error": push(`Your song “${decodeEntities(d.title)}” couldn't play. You get to pick again!`, "warning", 9000); break;
       case "you_are_singing": push("🎤 You're singing now! Grab the mic.", "success", 9000); navigator.vibrate?.([200, 100, 200]); break;
       case "you_are_next": push("You're up next on the mic. Get ready!", "info", 8000); break;
-      case "turn_timeout": push("Your turn timed out. You'll get another go next round.", "warning", 8000); break;
+      case "turn_overtime": push("Time's up, but your turn isn't lost. Pick a song or let the next singer go first.", "warning", 9000); break;
       case "superset": if (d.active) push(`★ SUPERSET round! Everyone sings: ${d.theme?.name}`, "gold", 9000); break;
       case "event_ended": push("The event has ended. Thanks for singing!", "info", 10000); break;
       case "guest_left":
@@ -201,7 +201,14 @@ function GuestHome({ me, onLeave }) {
   const mySongs = state.queue.filter((i) => i.guest_id === myId);
   const singingNow = state.now_playing?.guest_id === myId;
   const nextUp = state.queue[0]?.guest_id === myId;
-  const canAdd = myTurn && (turn.state === "choosing" || turn.state === "spinning") && ev.status === "active";
+  const choosing = myTurn && (turn.state === "choosing" || turn.state === "overtime");
+  const canAdd = myTurn && (choosing || turn.state === "spinning") && ev.status === "active";
+  const iPassed = (state.passed || []).some((p) => p.guest_id === myId && !p.ready);
+  const passTurn = async () => {
+    if (!window.confirm("Let the next singer go first? You'll pick right after them.")) return;
+    try { await api("/api/guest/pass", { method: "POST", guest: true }); }
+    catch (e) { push(e.message, "error"); }
+  };
 
   let status;
   if (ev.status === "ended") status = <div className="status-card"><div className="status-big">Thanks for singing!</div><div className="muted">This event has ended.</div></div>;
@@ -214,13 +221,20 @@ function GuestHome({ me, onLeave }) {
           <ThemeSpinner spinKey={`${turn.id}-${turn.theme?.name}`} candidates={spinMeta.candidates?.length ? spinMeta.candidates : themes}
                         result={turn.theme?.name} duration={spinMeta.duration} superset={superset} size="md" />
         )}
-        {turn.state === "choosing" && (
+        {choosing && (
           <>
             {turn.theme && <div className={`theme-pill ${superset ? "superset" : ""}`}>{turn.theme.name}</div>}
             {turn.theme?.description && <div className="muted small">{turn.theme.description}</div>}
-            <Countdown deadline={turn.deadline} remaining={turn.remaining} serverNow={serverNow}
-                       total={ev.config.turn_seconds} paused={ev.rotation_paused} />
-            <div className="muted small">Search below and tap Add before the timer runs out.</div>
+            {turn.state === "choosing" ? (
+              <>
+                <Countdown deadline={turn.deadline} remaining={turn.remaining} serverNow={serverNow}
+                           total={ev.config.turn_seconds} paused={ev.rotation_paused} />
+                <div className="muted small">Search below and tap Add. No rush: your turn won't be skipped.</div>
+              </>
+            ) : (
+              <div className="overtime">⏱ Time's up, but it's still your pick.</div>
+            )}
+            <button className="btn btn-block pass-btn" onClick={passTurn}>Not ready? Let the next singer go first</button>
           </>
         )}
       </div>
@@ -235,7 +249,8 @@ function GuestHome({ me, onLeave }) {
             {position === 1 ? "You pick next" : position ? `${position} turns until you pick` : "Hang tight"}
           </div>
         )}
-        {turn && <div className="muted">{turn.guest_name} is {turn.state === "choosing" ? "choosing a song" : "up"}.</div>}
+        {iPassed && <div className="muted">You passed. You'll pick right after the next singer.</div>}
+        {turn && <div className="muted">{turn.guest_name} is {turn.state === "choosing" || turn.state === "overtime" ? "choosing a song" : "up"}.</div>}
         {ev.status !== "active" && <div className="muted">Waiting for the host to start.</div>}
         {ev.rotation_paused && <div className="muted">The host paused the rotation.</div>}
       </div>
@@ -322,9 +337,9 @@ function GuestHome({ me, onLeave }) {
           <h3>Singing order</h3>
           <ol className="list compact">
             {turn && <li><strong>{turn.guest_name}</strong> <span className="pill">picking</span></li>}
-            {state.upcoming.map((id) => {
+            {state.upcoming.map((id, idx) => {
               const g = state.guests.find((x) => x.id === id);
-              return g ? <li key={id} className={id === myId ? "mine" : ""}>{g.name}{id === myId ? " (you)" : ""}</li> : null;
+              return g ? <li key={`${id}-${idx}`} className={id === myId ? "mine" : ""}>{g.name}{id === myId ? " (you)" : ""}</li> : null;
             })}
           </ol>
         </section>

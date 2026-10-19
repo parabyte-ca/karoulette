@@ -291,6 +291,11 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         item = await run(engine.queue_song, guest["id"], video, event_id=guest["event_id"])
         return {"ok": True, "item_id": item["id"]}
 
+    @app.post("/api/guest/pass")
+    async def guest_pass(guest: dict = Depends(current_guest)):
+        await run(engine.pass_turn, guest["id"], event_id=guest["event_id"])
+        return {"ok": True}
+
     @app.delete("/api/guest/queue/{item_id}")
     async def guest_remove(item_id: int, guest: dict = Depends(current_guest)):
         await run(engine.remove_item, guest["event_id"], item_id, guest["id"], event_id=guest["event_id"])
