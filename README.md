@@ -1,10 +1,10 @@
-# KaraokeQueue
-> Self-hosted, multi-user karaoke night: guests join by QR code, take turns in a fixed rotation, spin a theme and queue YouTube karaoke videos that play on the TV.
+# Karoulette
+> Karaoke meets roulette. Self-hosted, multi-user karaoke night: guests join by QR code, take turns in a fixed rotation, spin a theme and queue YouTube karaoke videos that play on the TV.
 
-![Version](https://img.shields.io/badge/version-0.4.0-blue)
+![Version](https://img.shields.io/badge/version-0.5.0-blue)
 
 ## Overview
-KaraokeQueue runs your karaoke party from one TV and everyone's phones. The TV (host screen) plays YouTube karaoke videos through the official YouTube player in a browser signed into YouTube Premium, so there are no ads. Guests scan a QR code, pick a display name and wait for their turn; when it comes, a theme randomizer spins and they search for a karaoke version that fits. Everything syncs in real time and survives a container restart.
+Karoulette runs your karaoke party from one TV and everyone's phones. The TV (host screen) plays YouTube karaoke videos through the official YouTube player in a browser signed into YouTube Premium, so there are no ads. Guests scan a QR code, pick a display name and wait for their turn; when it comes, a theme randomizer spins and they search for a karaoke version that fits. Everything syncs in real time and survives a container restart.
 
 ## Features
 - **Host / TV screen** (`/host`): full-screen YouTube player, current singer, up next, queue, round and theme, QR code, join URL and code. High-contrast dark layout readable from across the room.
@@ -37,24 +37,24 @@ KaraokeQueue runs your karaoke party from one TV and everyone's phones. The TV (
 Run once on first deployment. It is safe to re-run.
 
 ```bash
-git clone https://github.com/parabyte-ca/karoulette.git karaokequeue
-cd karaokequeue
+git clone https://github.com/parabyte-ca/karoulette.git karoulette
+cd karoulette
 ./setup.sh
 ```
 
-`setup.sh` creates `.env` from `.env.example`, asks for the port, data folder, host PIN, YouTube API key and public URL, generates a `SECRET_KEY`, fixes the data folder owner, builds `parabyte-ca/karaokequeue:<version>` + `:latest`, starts the container and waits for the health check.
+`setup.sh` creates `.env` from `.env.example`, asks for the port, data folder, host PIN, YouTube API key and public URL, generates a `SECRET_KEY`, fixes the data folder owner, builds `parabyte-ca/karoulette:<version>` + `:latest`, starts the container and waits for the health check.
 
 Non-interactive (automation friendly):
 
 ```bash
-HOST_PIN=9731 YOUTUBE_API_KEY=AIza... KQ_DATA_DIR=/mnt/tank/apps/karaokequeue ./setup.sh -y
+HOST_PIN=9731 YOUTUBE_API_KEY=AIza... KQ_DATA_DIR=/mnt/tank/apps/karoulette ./setup.sh -y
 ```
 
 **TrueNAS SCALE notes**
-- Clone into a dataset, e.g. `/mnt/tank/apps/karaokequeue-src`, and point `KQ_DATA_DIR` at a separate dataset such as `/mnt/tank/apps/karaokequeue`.
+- Clone into a dataset, e.g. `/mnt/tank/apps/karoulette-src`, and point `KQ_DATA_DIR` at a separate dataset such as `/mnt/tank/apps/karoulette`.
 - The container runs as UID/GID `568` (the TrueNAS `apps` user) by default; change `PUID`/`PGID` in `.env` if needed.
 - Default port is **8095** (from the parabyte-ca port registry).
-- To use prebuilt images instead of building on the NAS, set `KQ_IMAGE=ghcr.io/parabyte-ca/karaokequeue` in `.env`.
+- To use prebuilt images instead of building on the NAS, set `KQ_IMAGE=ghcr.io/parabyte-ca/karoulette` in `.env`.
 
 ## Update
 ```bash
@@ -62,8 +62,10 @@ HOST_PIN=9731 YOUTUBE_API_KEY=AIza... KQ_DATA_DIR=/mnt/tank/apps/karaokequeue ./
 ```
 Pulls the latest code (`git pull --ff-only`), backs up the database (`<data folder>/backups/`, last 10 kept), rebuilds the image (or pulls it when `KQ_IMAGE` points at GHCR), restarts and waits for the health check. If the new version isn't healthy it goes back to the previous image and code. Running events resume where they left off. `./update.sh --no-git` rebuilds the current checkout without pulling.
 
+**Upgrading from KaraokeQueue (0.4.x and earlier)**: the project was renamed to Karoulette in 0.5.0. Just update as usual (admin Upgrade button or `./update.sh`): the container (`karaokequeue` → `karoulette`), image (`parabyte-ca/karaokequeue` → `parabyte-ca/karoulette`, also fixed in `.env`) and database file (`karaokequeue.db` → `karoulette.db`) move over automatically, and the database is backed up first. Your clone folder keeps its old name; that's fine. Prebuilt images are now published as `ghcr.io/parabyte-ca/karoulette`.
+
 ### One-click upgrades from Host admin → Updates
-KaraokeQueue checks GitHub once a day for a new release and shows it in Host admin (a gold "vX.Y.Z available" badge and the **Updates** tab, with release notes). The app runs in a container and can't rebuild itself, so a small helper on the host does the work:
+Karoulette checks GitHub once a day for a new release and shows it in Host admin (a gold "vX.Y.Z available" badge and the **Updates** tab, with release notes). The app runs in a container and can't rebuild itself, so a small helper on the host does the work:
 
 ```bash
 sudo ./scripts/upgrade-agent.sh --install   # setup.sh offers this too
@@ -82,7 +84,7 @@ All settings live in `.env` (see `.env.example`).
 | Variable | Default | Purpose |
 |---|---|---|
 | `KQ_PORT` | `8095` | Host port (container listens on 8000) |
-| `KQ_DATA_DIR` | `./data` | Host folder for `karaokequeue.db` (mounted at `/data`) |
+| `KQ_DATA_DIR` | `./data` | Host folder for `karoulette.db` (mounted at `/data`) |
 | `PUID` / `PGID` | `568` | User the container runs as |
 | `HOST_PIN` | _(required)_ | Host PIN or password, 4+ characters. When set, it always wins over a PIN changed in admin |
 | `YOUTUBE_API_KEY` | _(blank)_ | YouTube Data API v3 key. Blank = yt-dlp fallback search |
@@ -93,7 +95,7 @@ All settings live in `.env` (see `.env.example`).
 | `UPDATE_CHECK` | `true` | Daily check for new releases (Host admin → Updates) |
 | `SOURCE_REPO` | `parabyte-ca/karoulette` | GitHub repository releases are checked against |
 | `KQ_UPGRADE_FOLDER` | `./upgrade` | Host folder shared with the upgrade helper |
-| `KQ_IMAGE` / `KQ_TAG` | `parabyte-ca/karaokequeue` / `latest` | Image to run |
+| `KQ_IMAGE` / `KQ_TAG` | `parabyte-ca/karoulette` / `latest` | Image to run |
 | `TZ` | `America/Toronto` | Container time zone |
 
 **Per-event settings** (Host admin → Events): turn timer (15 to 600 s, default 180; a guide only, nobody is skipped when it runs out), Superset chance (default 15 %), recent-theme window (default 3), prevent duplicate songs (default on), SafeSearch (off / moderate / strict), longest video allowed (default 15 min), autoplay.
@@ -124,7 +126,7 @@ All settings live in `.env` (see `.env.example`).
 
 ### Demo data
 ```bash
-docker exec karaokequeue python -m scripts.seed_demo
+docker exec karoulette python -m scripts.seed_demo
 ```
 Creates a "Demo Night" event with six guests, a few queued songs and history, and prints guest tokens. Demo video IDs are examples and may not all be embeddable; the embed error handler will skip any that aren't.
 
@@ -161,7 +163,7 @@ python -m pytest -q
 cd frontend && npm install && npm run dev
 ```
 
-CI (`.github/workflows/docker.yml`) runs the backend tests and frontend build, then builds a multi-arch image and pushes `ghcr.io/parabyte-ca/karaokequeue:<version>` and `:latest` on `main` (and `:<semver>` on `v*` tags).
+CI (`.github/workflows/docker.yml`) runs the backend tests and frontend build, then builds a multi-arch image and pushes `ghcr.io/parabyte-ca/karoulette:<version>` and `:latest` on `main` (and `:<semver>` on `v*` tags).
 
 ## Changelog
 See [CHANGELOG.md](CHANGELOG.md).

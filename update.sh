@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# KaraokeQueue safe update: pull code -> back up the database -> rebuild (or pull image) -> restart ->
+# Karoulette safe update: pull code -> back up the database -> rebuild (or pull image) -> restart ->
 # health check -> roll back to the previous image and code if it isn't healthy. Data is preserved.
 #   ./update.sh            normal update (also what Host admin > Updates runs via scripts/upgrade-agent.sh)
 #   ./update.sh --no-git   rebuild and restart the current checkout without pulling
@@ -24,24 +24,30 @@ main() {
 
   OLD_VERSION="$(cat VERSION 2>/dev/null || echo unknown)"
   OLD_REV="$(git_ rev-parse HEAD 2>/dev/null || echo "")"
-  IMAGE="$(image)"
+  OLD_IMAGE="$(image)"
 
   if [[ "$use_git" == 1 ]]; then
     say "Pulling latest code"
     git_ pull --ff-only
   fi
   VERSION="$(cat VERSION 2>/dev/null || echo latest)"
+  migrate_legacy_env
+  IMAGE="$(image)"
 
   # 1. Back up the database from inside the running container (SQLite online backup; keeps the last 10).
-  if docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+  RUNNING="$(running_container || true)"
+  if [[ -n "$RUNNING" ]]; then
     say "Backing up the database"
-    docker exec -i "$CONTAINER" python - "$OLD_VERSION" <<'PY' || warn "backup failed; continuing (the data folder is untouched)"
+    docker exec -i "$RUNNING" python - "$OLD_VERSION" <<'PY' || warn "backup failed; continuing (the data folder is untouched)"
 import sqlite3, sys, time
 from pathlib import Path
 backups = Path("/data/backups")
 backups.mkdir(exist_ok=True)
 dest = backups / f"pre-update-{sys.argv[1]}-{time.strftime('%Y%m%d-%H%M%S')}.db"
-src, out = sqlite3.connect("/data/karaokequeue.db"), sqlite3.connect(dest)
+db = Path("/data/karoulette.db")
+if not db.exists() and Path("/data/karaokequeue.db").exists():
+    db = Path("/data/karaokequeue.db")  # still running a pre-0.5.0 version
+src, out = sqlite3.connect(db), sqlite3.connect(dest)
 src.backup(out)
 out.close()
 src.close()
@@ -52,13 +58,17 @@ PY
   fi
 
   # 2. Keep the running image so we can go back to it.
+  # (The running image may still carry the pre-rename name.)
   HAVE_ROLLBACK=0
-  if docker image inspect "$IMAGE:latest" >/dev/null 2>&1; then
-    docker tag "$IMAGE:latest" "$IMAGE:rollback" && HAVE_ROLLBACK=1
-  fi
+  for candidate in "$IMAGE" "$OLD_IMAGE"; do
+    if docker image inspect "$candidate:latest" >/dev/null 2>&1; then
+      docker tag "$candidate:latest" "$IMAGE:rollback" && HAVE_ROLLBACK=1
+      break
+    fi
+  done
 
   rollback() {
-    warn "KaraokeQueue $VERSION did not come up healthy; rolling back to $OLD_VERSION"
+    warn "Karoulette $VERSION did not come up healthy; rolling back to $OLD_VERSION"
     if [[ "$HAVE_ROLLBACK" == 1 ]]; then
       docker tag "$IMAGE:rollback" "$IMAGE:latest"
       if [[ -n "$OLD_REV" && "$use_git" == 1 ]]; then git_ reset --hard "$OLD_REV" >/dev/null; fi
@@ -85,7 +95,7 @@ PY
   docker compose up -d --remove-orphans || rollback
   wait_healthy 90 || rollback
   docker image prune -f >/dev/null 2>&1 || true
-  ok "Updated KaraokeQueue $OLD_VERSION -> $VERSION. The running event resumes where it left off."
+  ok "Updated Karoulette $OLD_VERSION -> $VERSION. The running event resumes where it left off."
 }
 
 main "$@"

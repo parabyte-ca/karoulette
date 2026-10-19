@@ -19,7 +19,7 @@ import httpx
 from . import logic
 from .db import Database
 
-log = logging.getLogger("karaokequeue.youtube")
+log = logging.getLogger("karoulette.youtube")
 
 API_BASE = "https://www.googleapis.com/youtube/v3"
 SEARCH_COST = 100

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 from fastapi import WebSocket
 
-log = logging.getLogger("karaokequeue.ws")
+log = logging.getLogger("karoulette.ws")
 
 
 @dataclass(eq=False)

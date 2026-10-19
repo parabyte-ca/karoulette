@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0] - 2026-10-19
+### Changed
+- Renamed the project from KaraokeQueue to **Karoulette** (karaoke + roulette) everywhere: UI, page titles, docs, scripts, Docker image (`parabyte-ca/karoulette`, `ghcr.io/parabyte-ca/karoulette`), container (`karoulette`), database file (`karoulette.db`), release names and the upgrade helper's schedule.
+- Brand mark is now Kar**oulette**, with the accent on the roulette half.
+
+### Added
+- Automatic migration for existing installs: on startup the old `karaokequeue.db` (and its WAL files) is renamed; `update.sh` backs up from whichever container is running, renames `KQ_IMAGE` in `.env`, keeps a rollback image from the old name, and Compose swaps the old container for the new one. `upgrade-agent.sh --install` removes the old-named schedule so there are no duplicates.
+
 ## [0.4.0] - 2026-10-19
 ### Added
 - Five colour schemes, chosen in Host admin → Appearance and pushed live to the TV and every phone: Neon Night (the original), On Air, Synthwave Sunset, Velvet Lounge and Northern Lights. Each has its own background treatment (studio key light and scanlines, sun-and-grid horizon, velvet curtains, drifting aurora) and display font.
@@ -37,7 +45,7 @@
 
 ## [0.1.0] - 2026-10-19
 ### Added
-- Initial release of KaraokeQueue.
+- Initial release of Karoulette.
 - Host/TV screen with YouTube IFrame Player, YouTube Premium checklist, queue, round/theme display, QR code and join URL, host controls and keyboard shortcuts.
 - Mobile guest UI: join by code or QR, turn status, theme spin, karaoke search, queue view, off-theme flagging, leave.
 - Fixed join-order rotation with late joiners appended, turn timer with timeout skip, pause/resume, host skip/remove.

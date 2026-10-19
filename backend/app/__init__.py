@@ -1,1 +1,1 @@
-"""KaraokeQueue backend."""
+"""Karoulette backend."""

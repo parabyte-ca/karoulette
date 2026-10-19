@@ -32,7 +32,7 @@ def client(tmp_path):
 
     def make():
         from app.db import Database
-        return StubYouTube(Database(tmp_path / "karaokequeue.db"))
+        return StubYouTube(Database(tmp_path / "karoulette.db"))
 
     app = create_app(settings, start_ticker=False, youtube=make())
     with TestClient(app) as c:

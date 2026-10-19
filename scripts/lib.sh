@@ -4,8 +4,11 @@
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/.env"
-PROJECT="karaokequeue"
-CONTAINER="karaokequeue"
+PROJECT="karoulette"
+CONTAINER="karoulette"
+# Names used before the rename from KaraokeQueue (v0.5.0); kept so updates migrate old installs.
+LEGACY_CONTAINER="karaokequeue"
+LEGACY_IMAGE="parabyte-ca/karaokequeue"
 
 # Colour only on a terminal, so the upgrade log shown in Host admin stays plain text.
 if [[ -t 1 ]]; then C_SAY=$'\e[1;35m'; C_OK=$'\e[1;32m'; C_WARN=$'\e[1;33m'; C_ERR=$'\e[1;31m'; C_END=$'\e[0m'
@@ -36,6 +39,21 @@ set_env() {
 abs_path() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$ROOT_DIR" "${1#./}" ;; esac; }
 
 image() { local i; i="$(get_env KQ_IMAGE)"; printf '%s' "${i:-parabyte-ca/$PROJECT}"; }
+
+# running_container -> name of the app container that is up now (new or pre-rename name)
+running_container() {
+  docker ps --format '{{.Names}}' | grep -xE "$CONTAINER|$LEGACY_CONTAINER" | head -1
+}
+
+# migrate_legacy_env -> point an old KQ_IMAGE (parabyte-ca/karaokequeue) at the renamed image
+migrate_legacy_env() {
+  local img
+  img="$(get_env KQ_IMAGE)"
+  case "$img" in
+    "$LEGACY_IMAGE") set_env KQ_IMAGE "parabyte-ca/$PROJECT"; ok "KQ_IMAGE renamed to parabyte-ca/$PROJECT" ;;
+    "ghcr.io/parabyte-ca/karaokequeue") set_env KQ_IMAGE "ghcr.io/parabyte-ca/$PROJECT"; ok "KQ_IMAGE renamed to ghcr.io/parabyte-ca/$PROJECT" ;;
+  esac
+}
 port() { local p; p="$(get_env KQ_PORT)"; printf '%s' "${p:-8095}"; }
 puid() { local u; u="$(get_env PUID)"; printf '%s' "${u:-568}"; }
 pgid() { local g; g="$(get_env PGID)"; printf '%s' "${g:-568}"; }

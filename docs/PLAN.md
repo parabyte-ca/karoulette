@@ -1,4 +1,4 @@
-# KaraokeQueue — Build Plan (v0.1.0)
+# Karoulette — Build Plan (v0.1.0)
 
 ## 1. Architecture
 
@@ -12,7 +12,7 @@
                      ├── WS:   /ws/{event_code}?role=host|guest&token=…
                      ├── EventEngine (rotation, rounds, superset, timer)  ← pure logic, unit tested
                      ├── YouTubeService (Data API v3 → yt-dlp fallback, SQLite cache, quota ledger)
-                     └── SQLite (DATA_PATH/karaokequeue.db, WAL)
+                     └── SQLite (DATA_PATH/karoulette.db, WAL)
                      Serves built React SPA (Vite) as static files
 ```
 
@@ -87,9 +87,9 @@ VERSION, CHANGELOG.md, README.md (+ First event checklist), .github/workflows/do
 
 ## 8. Config (env)
 
-`KQ_PORT` (host port, default **8095**), `YOUTUBE_API_KEY`, `DATA_PATH` (default `/data`; TrueNAS: `/mnt/<pool>/apps/karaokequeue`), `HOST_PIN` (first-run only; hashed into DB, changeable in admin), `SECRET_KEY` (auto-generated into DATA_PATH if unset), `PUBLIC_BASE_URL` (for QR; defaults to request host), `YOUTUBE_DAILY_QUOTA`, `TZ`.
+`KQ_PORT` (host port, default **8095**), `YOUTUBE_API_KEY`, `DATA_PATH` (default `/data`; TrueNAS: `/mnt/<pool>/apps/karoulette`), `HOST_PIN` (first-run only; hashed into DB, changeable in admin), `SECRET_KEY` (auto-generated into DATA_PATH if unset), `PUBLIC_BASE_URL` (for QR; defaults to request host), `YOUTUBE_DAILY_QUOTA`, `TZ`.
 
 ## 9. Testing / CI
 
 - pytest: rotation (order, late join, leave mid-turn, wrap → round++), superset (chance, force, cancel, theme locked, flags), queue ordering (reorder, remove, duplicates, auto-advance, error re-pick), theme picker (no repeat, recent window, weights).
-- GH Actions: test job → build + push `ghcr.io/parabyte-ca/karaokequeue:{version,latest}` on main/tags.
+- GH Actions: test job → build + push `ghcr.io/parabyte-ca/karoulette:{version,latest}` on main/tags.

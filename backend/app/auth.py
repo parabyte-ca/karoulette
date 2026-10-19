@@ -9,7 +9,7 @@ import time
 
 from .db import Database
 
-log = logging.getLogger("karaokequeue.auth")
+log = logging.getLogger("karoulette.auth")
 
 COOKIE_NAME = "kq_host"
 SESSION_SECONDS = 24 * 3600

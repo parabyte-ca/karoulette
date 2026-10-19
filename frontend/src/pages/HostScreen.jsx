@@ -23,10 +23,10 @@ function PremiumChecklist({ onContinue }) {
   return (
     <main className="center-page">
       <div className="card checklist">
-        <h1 className="brand small">Karaoke<span>Queue</span></h1>
+        <h1 className="brand small">Kar<span>oulette</span></h1>
         <h2>Before we start</h2>
         <p className="muted">Ad-free playback relies on this browser being signed in to YouTube Premium.
-          KaraokeQueue never downloads or rips video; it plays YouTube's own player.</p>
+          Karoulette never downloads or rips video; it plays YouTube's own player.</p>
         <ul className="checks">
           {items.map(([key, text]) => (
             <li key={key}>
@@ -207,7 +207,7 @@ export default function HostScreen() {
     <div className={`tv ${superset ? "is-superset" : ""}`}>
       <header className="tv-top">
         <div className="tv-title">
-          <span className="brand tiny">Karaoke<span>Queue</span></span>
+          <span className="brand tiny">Kar<span>oulette</span></span>
           <span className="tv-event">{ev.name}</span>
         </div>
         <div className="tv-round">

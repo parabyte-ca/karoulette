@@ -1,9 +1,9 @@
 services:
-  karaokequeue:
-    image: ${KQ_IMAGE:-parabyte-ca/karaokequeue}:${KQ_TAG:-latest}
+  karoulette:
+    image: ${KQ_IMAGE:-parabyte-ca/karoulette}:${KQ_TAG:-latest}
     build:
       context: .
-    container_name: karaokequeue
+    container_name: karoulette
     restart: unless-stopped
     user: "${PUID:-568}:${PGID:-568}"
     env_file:
