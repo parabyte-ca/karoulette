@@ -1,7 +1,7 @@
 # KaraokeQueue
 > Self-hosted, multi-user karaoke night: guests join by QR code, take turns in a fixed rotation, spin a theme and queue YouTube karaoke videos that play on the TV.
 
-![Version](https://img.shields.io/badge/version-0.3.0-blue)
+![Version](https://img.shields.io/badge/version-0.4.0-blue)
 
 ## Overview
 KaraokeQueue runs your karaoke party from one TV and everyone's phones. The TV (host screen) plays YouTube karaoke videos through the official YouTube player in a browser signed into YouTube Premium, so there are no ads. Guests scan a QR code, pick a display name and wait for their turn; when it comes, a theme randomizer spins and they search for a karaoke version that fits. Everything syncs in real time and survives a container restart.
@@ -22,6 +22,7 @@ KaraokeQueue runs your karaoke party from one TV and everyone's phones. The TV (
 - **Real-time sync** over WebSockets; full state persisted in SQLite so a restart resumes the event, including the turn timer.
 - **Multiple events** with a start/end lifecycle and a short join code. Song history per event with **CSV export**.
 - **Duplicate prevention** per event (host-configurable).
+- **Five colour schemes**, switchable live from Host admin → Appearance (TV, phones and admin repaint instantly, even mid-event): **Neon Night** (original), **On Air** (broadcast studio), **Synthwave Sunset** (80s outrun), **Velvet Lounge** (jazz club) and **Northern Lights** (Canadian aurora). Each has its own background art and display font, and all stay dark and high-contrast.
 - **Updates from the admin page** (same model as project-glasshaus): a daily check for new GitHub releases, the running version and any new release shown in Host admin, release notes, and a one-click **Upgrade** that a small host helper carries out with a database backup, health check and automatic rollback.
 - **Security**: host PIN (PBKDF2-hashed, HttpOnly signed session cookie), rate-limited search/join/login, validated inputs, API key never sent to browsers.
 - Automated tests for rotation, Superset and queue logic, plus a demo seed script.
@@ -117,6 +118,7 @@ All settings live in `.env` (see `.env.example`).
 - **Events**: settings, singers (skip/remove), theme history, CSV export, delete.
 - **Themes**: add, edit, weight, enable/disable, delete.
 - **YouTube**: search mode and estimated quota left today.
+- **Appearance**: live mini-mockups of each colour scheme; one click switches every screen.
 - **Updates**: running version, latest release and notes, check now, one-click upgrade with live progress and log.
 - **Security**: change the PIN (when not set by `HOST_PIN`), sign out.
 

@@ -139,3 +139,21 @@ def test_updates_endpoints_need_host(client):
     body = client.get("/api/host/updates").json()
     assert body["current"] and body["helper"]["configured"] is False
     assert client.post("/api/host/updates/upgrade", json={"version": "bad"}).status_code == 422
+
+
+def test_colour_scheme_setting(client):
+    assert client.get("/api/public/appearance").json() == {"scheme": "neon"}
+    assert client.put("/api/host/appearance", json={"scheme": "aurora"}).status_code == 401
+    login(client)
+    assert client.put("/api/host/appearance", json={"scheme": "nope"}).status_code == 400
+    assert client.put("/api/host/appearance", json={"scheme": "synthwave"}).json() == {"scheme": "synthwave"}
+    assert client.get("/api/public/appearance").json() == {"scheme": "synthwave"}
+    code = client.post("/api/host/events", json={"name": "Look"}).json()["join_code"]
+    token = client.post("/api/guest/join", json={"code": code, "name": "Ana"}).json()["token"]
+    with client.websocket_connect(f"/ws/{code}?token={token}") as ws:
+        assert ws.receive_json()["data"]["appearance"]["scheme"] == "synthwave"
+        client.put("/api/host/appearance", json={"scheme": "velvet"})
+        msg = ws.receive_json()
+        while msg["type"] != "state":
+            msg = ws.receive_json()
+        assert msg["data"]["appearance"]["scheme"] == "velvet"

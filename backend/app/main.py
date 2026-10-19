@@ -40,6 +40,10 @@ class QueueIn(BaseModel):
     thumbnail: str | None = Field(default=None, max_length=500)
 
 
+class AppearanceIn(BaseModel):
+    scheme: str = Field(min_length=1, max_length=20)
+
+
 class PinIn(BaseModel):
     pin: str = Field(min_length=1, max_length=64)
 
@@ -470,6 +474,16 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
             return upd.request_upgrade(body.version)
         except UpdateError as exc:
             raise HTTPException(exc.status, exc.message) from exc
+
+    @app.get("/api/public/appearance")
+    async def public_appearance():
+        return engine.appearance()
+
+    @app.put("/api/host/appearance", dependencies=host)
+    async def set_appearance(body: AppearanceIn):
+        result = await run(engine.set_scheme, body.scheme)
+        await broadcast([], set(hub.rooms))  # repaint every TV and phone right away
+        return result
 
     @app.get("/api/public/themes")
     async def public_themes():

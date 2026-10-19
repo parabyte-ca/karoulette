@@ -3,8 +3,9 @@ import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { Toasts, useToasts } from "../components/Toasts";
 import UpdatesTab from "./UpdatesTab";
+import AppearanceTab from "./AppearanceTab";
 
-const TABS = [["events", "Events"], ["themes", "Themes"], ["youtube", "YouTube"], ["updates", "Updates"], ["security", "Security"]];
+const TABS = [["events", "Events"], ["themes", "Themes"], ["youtube", "YouTube"], ["appearance", "Appearance"], ["updates", "Updates"], ["security", "Security"]];
 
 function ThemesTab({ push }) {
   const [themes, setThemes] = useState([]);
@@ -333,6 +334,7 @@ export default function HostAdmin() {
       {tab === "events" && <EventsTab push={push} />}
       {tab === "themes" && <ThemesTab push={push} />}
       {tab === "youtube" && <YouTubeTab push={push} />}
+      {tab === "appearance" && <AppearanceTab push={push} />}
       {tab === "updates" && <UpdatesTab push={push} loadedVersion={info.version} />}
       {tab === "security" && <SecurityTab push={push} />}
       <Toasts toasts={toasts} />
