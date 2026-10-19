@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,15 +15,28 @@ def _read_version() -> str:
     return "0.0.0"
 
 
+def normalise_base_url(value: str) -> str:
+    """Keep only the site root: people often paste the join or host page URL here."""
+    value = (value or "").strip().rstrip("/")
+    while True:
+        trimmed = re.sub(r"/(join|host)(/[A-Za-z0-9]*)?$", "", value, flags=re.IGNORECASE).rstrip("/")
+        if trimmed == value:
+            return value
+        value = trimmed
+
+
 @dataclass
 class Settings:
     data_path: Path = field(default_factory=lambda: Path(os.getenv("DATA_PATH", "/data")))
     youtube_api_key: str = field(default_factory=lambda: os.getenv("YOUTUBE_API_KEY", "").strip())
     youtube_daily_quota: int = field(default_factory=lambda: int(os.getenv("YOUTUBE_DAILY_QUOTA", "10000")))
     host_pin: str = field(default_factory=lambda: os.getenv("HOST_PIN", "").strip())
-    public_base_url: str = field(default_factory=lambda: os.getenv("PUBLIC_BASE_URL", "").rstrip("/"))
+    public_base_url: str = field(default_factory=lambda: normalise_base_url(os.getenv("PUBLIC_BASE_URL", "")))
     secret_key: str = field(default_factory=lambda: os.getenv("SECRET_KEY", "").strip())
     static_dir: Path = field(default_factory=lambda: Path(os.getenv("STATIC_DIR", "/app/static")))
+    source_repo: str = field(default_factory=lambda: os.getenv("SOURCE_REPO", "parabyte-ca/karoulette").strip())
+    update_check: bool = field(default_factory=lambda: os.getenv("UPDATE_CHECK", "true").lower() != "false")
+    upgrade_dir: str = field(default_factory=lambda: os.getenv("UPGRADE_DIR", "").strip())
     enable_ytdlp: bool = field(default_factory=lambda: os.getenv("ENABLE_YTDLP", "true").lower() != "false")
     version: str = field(default_factory=_read_version)
 

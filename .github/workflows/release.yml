@@ -1,0 +1,39 @@
+name: Tag release
+
+# When VERSION changes on main, tag the commit vX.Y.Z and publish a GitHub Release with that version's
+# CHANGELOG section. KaraokeQueue's Host admin > Updates checks the latest Release once a day.
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tag-release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          tag="v${version}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "${tag} already exists; nothing to do."
+            exit 0
+          fi
+          awk -v v="[${version}]" '
+            /^## / { if (inside) exit; inside = index($0, v) > 0; next }
+            inside { print }' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
+          gh release create "${tag}" --target "${GITHUB_SHA}" --title "KaraokeQueue ${version}" --notes-file notes.md
+          echo "::notice::Published ${tag}"

@@ -10,7 +10,10 @@ services:
       - .env
     environment:
       DATA_PATH: /data
+      # Shared with the host's upgrade helper (scripts/upgrade-agent.sh) for Host admin > Updates.
+      UPGRADE_DIR: /upgrade
     ports:
       - "${KQ_PORT:-8095}:8000"
     volumes:
       - ${KQ_DATA_DIR:-./data}:/data
+      - ${KQ_UPGRADE_FOLDER:-./upgrade}:/upgrade

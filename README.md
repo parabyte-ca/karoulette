@@ -1,7 +1,7 @@
 # KaraokeQueue
 > Self-hosted, multi-user karaoke night: guests join by QR code, take turns in a fixed rotation, spin a theme and queue YouTube karaoke videos that play on the TV.
 
-![Version](https://img.shields.io/badge/version-0.2.0-blue)
+![Version](https://img.shields.io/badge/version-0.3.0-blue)
 
 ## Overview
 KaraokeQueue runs your karaoke party from one TV and everyone's phones. The TV (host screen) plays YouTube karaoke videos through the official YouTube player in a browser signed into YouTube Premium, so there are no ads. Guests scan a QR code, pick a display name and wait for their turn; when it comes, a theme randomizer spins and they search for a karaoke version that fits. Everything syncs in real time and survives a container restart.
@@ -22,6 +22,7 @@ KaraokeQueue runs your karaoke party from one TV and everyone's phones. The TV (
 - **Real-time sync** over WebSockets; full state persisted in SQLite so a restart resumes the event, including the turn timer.
 - **Multiple events** with a start/end lifecycle and a short join code. Song history per event with **CSV export**.
 - **Duplicate prevention** per event (host-configurable).
+- **Updates from the admin page** (same model as project-glasshaus): a daily check for new GitHub releases, the running version and any new release shown in Host admin, release notes, and a one-click **Upgrade** that a small host helper carries out with a database backup, health check and automatic rollback.
 - **Security**: host PIN (PBKDF2-hashed, HttpOnly signed session cookie), rate-limited search/join/login, validated inputs, API key never sent to browsers.
 - Automated tests for rotation, Superset and queue logic, plus a demo seed script.
 
@@ -58,7 +59,21 @@ HOST_PIN=9731 YOUTUBE_API_KEY=AIza... KQ_DATA_DIR=/mnt/tank/apps/karaokequeue ./
 ```bash
 ./update.sh
 ```
-Pulls the latest code (`git pull --ff-only`), rebuilds the image (or pulls it when `KQ_IMAGE` points at GHCR), restarts with `docker compose up -d` and waits for the health check. The database lives in `KQ_DATA_DIR`, so running events resume where they left off.
+Pulls the latest code (`git pull --ff-only`), backs up the database (`<data folder>/backups/`, last 10 kept), rebuilds the image (or pulls it when `KQ_IMAGE` points at GHCR), restarts and waits for the health check. If the new version isn't healthy it goes back to the previous image and code. Running events resume where they left off. `./update.sh --no-git` rebuilds the current checkout without pulling.
+
+### One-click upgrades from Host admin → Updates
+KaraokeQueue checks GitHub once a day for a new release and shows it in Host admin (a gold "vX.Y.Z available" badge and the **Updates** tab, with release notes). The app runs in a container and can't rebuild itself, so a small helper on the host does the work:
+
+```bash
+sudo ./scripts/upgrade-agent.sh --install   # setup.sh offers this too
+```
+
+- On **TrueNAS SCALE** it adds a cron job (System → Advanced Settings → Cron Jobs) through `midclt`, so it survives TrueNAS updates. Elsewhere it uses `/etc/cron.d` or a systemd timer.
+- It runs every 15 minutes as root and only acts when you press **Upgrade**: it runs `update.sh` (backup, rebuild, health check, rollback) and reports progress and the log back to the admin page.
+- `--print` shows what to schedule by hand, `--uninstall` removes it, `--every N` changes the interval.
+- The app and helper talk through the upgrade folder (`KQ_UPGRADE_FOLDER`, default `./upgrade`), using the same protocol as project-glasshaus.
+
+Releases are published automatically by `.github/workflows/release.yml` whenever `VERSION` changes on `main` (tag `vX.Y.Z` plus a GitHub Release with that version's CHANGELOG section). Before the first Release exists, the check reads `VERSION` and `CHANGELOG.md` from `main`.
 
 ## Configuration
 All settings live in `.env` (see `.env.example`).
@@ -71,9 +86,12 @@ All settings live in `.env` (see `.env.example`).
 | `HOST_PIN` | _(required)_ | Host PIN or password, 4+ characters. When set, it always wins over a PIN changed in admin |
 | `YOUTUBE_API_KEY` | _(blank)_ | YouTube Data API v3 key. Blank = yt-dlp fallback search |
 | `YOUTUBE_DAILY_QUOTA` | `10000` | Daily quota used for the remaining-quota estimate |
-| `PUBLIC_BASE_URL` | _(blank)_ | URL used in the QR code, e.g. `https://karaoke.example.ca`. Blank = the address the TV used |
+| `PUBLIC_BASE_URL` | _(blank)_ | Site address used in the QR code, e.g. `https://karaoke.example.ca` (just the root; a pasted `/join` or `/host` is stripped). Blank = the address the TV used |
 | `SECRET_KEY` | _(generated)_ | Signs host session cookies |
 | `ENABLE_YTDLP` | `true` | Allow the yt-dlp metadata fallback |
+| `UPDATE_CHECK` | `true` | Daily check for new releases (Host admin → Updates) |
+| `SOURCE_REPO` | `parabyte-ca/karoulette` | GitHub repository releases are checked against |
+| `KQ_UPGRADE_FOLDER` | `./upgrade` | Host folder shared with the upgrade helper |
 | `KQ_IMAGE` / `KQ_TAG` | `parabyte-ca/karaokequeue` / `latest` | Image to run |
 | `TZ` | `America/Toronto` | Container time zone |
 
@@ -99,6 +117,7 @@ All settings live in `.env` (see `.env.example`).
 - **Events**: settings, singers (skip/remove), theme history, CSV export, delete.
 - **Themes**: add, edit, weight, enable/disable, delete.
 - **YouTube**: search mode and estimated quota left today.
+- **Updates**: running version, latest release and notes, check now, one-click upgrade with live progress and log.
 - **Security**: change the PIN (when not set by `HOST_PIN`), sign out.
 
 ### Demo data

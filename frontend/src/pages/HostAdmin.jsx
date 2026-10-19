@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { Toasts, useToasts } from "../components/Toasts";
+import UpdatesTab from "./UpdatesTab";
 
-const TABS = [["events", "Events"], ["themes", "Themes"], ["youtube", "YouTube"], ["security", "Security"]];
+const TABS = [["events", "Events"], ["themes", "Themes"], ["youtube", "YouTube"], ["updates", "Updates"], ["security", "Security"]];
 
 function ThemesTab({ push }) {
   const [themes, setThemes] = useState([]);
@@ -304,11 +305,24 @@ function SecurityTab({ push }) {
 
 export default function HostAdmin() {
   const [tab, setTab] = useState("events");
+  const [info, setInfo] = useState({ version: null, update: null });
   const { toasts, push } = useToasts();
+  useEffect(() => {
+    api("/api/host/session").then((s) => setInfo((i) => ({ ...i, version: s.version }))).catch(() => {});
+    api("/api/host/updates")
+      .then((u) => setInfo((i) => ({ ...i, update: u.update_available ? u.latest.version : null })))
+      .catch(() => {});
+  }, []);
   return (
     <main className="page">
       <header className="page-header">
-        <h1 className="brand small">Karaoke<span>Queue</span> <span className="muted">admin</span></h1>
+        <h1 className="brand small">
+          Karaoke<span>Queue</span> <span className="muted">admin</span>
+          {info.version && <span className="version-tag" title="Running version">v{info.version}</span>}
+          {info.update && (
+            <button className="version-tag update" onClick={() => setTab("updates")}>v{info.update} available</button>
+          )}
+        </h1>
         <Link className="btn" to="/host">Back to events</Link>
       </header>
       <nav className="tabs">
@@ -319,6 +333,7 @@ export default function HostAdmin() {
       {tab === "events" && <EventsTab push={push} />}
       {tab === "themes" && <ThemesTab push={push} />}
       {tab === "youtube" && <YouTubeTab push={push} />}
+      {tab === "updates" && <UpdatesTab push={push} loadedVersion={info.version} />}
       {tab === "security" && <SecurityTab push={push} />}
       <Toasts toasts={toasts} />
     </main>
