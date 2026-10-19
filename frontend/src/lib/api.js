@@ -43,7 +43,7 @@ export async function api(path, { method = "GET", body, guest = false, raw = fal
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw new ApiError("Can't reach the KaraokeQueue server. Check your Wi-Fi.", 0);
+    throw new ApiError("Can't reach the Karoulette server. Check your Wi-Fi.", 0);
   }
   if (raw) return res;
   let data = null;

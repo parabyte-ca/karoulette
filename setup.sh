@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# KaraokeQueue first-time install. Idempotent: safe to re-run.
+# Karoulette first-time install. Idempotent: safe to re-run.
 # Usage: ./setup.sh                  (interactive)
 #        HOST_PIN=1234 ./setup.sh -y  (non-interactive; values come from the environment or defaults)
 set -euo pipefail
@@ -14,8 +14,9 @@ NONINTERACTIVE=0
 command -v docker >/dev/null || die "Docker is not installed."
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 ('docker compose') is required."
 
-say "Setting up KaraokeQueue v${VERSION}"
+say "Setting up Karoulette v${VERSION}"
 [[ -f .env ]] || { cp .env.example .env; say "Created .env from .env.example"; }
+migrate_legacy_env
 
 ask() {
   # ask KEY "Prompt" default [secret] -> environment value, else current .env value, else default
@@ -35,7 +36,7 @@ ask() {
 }
 
 ask KQ_PORT "Host port" "8095"
-ask KQ_DATA_DIR "Data folder (TrueNAS: /mnt/<pool>/apps/karaokequeue)" "./data"
+ask KQ_DATA_DIR "Data folder (TrueNAS: /mnt/<pool>/apps/karoulette)" "./data"
 ask HOST_PIN "Host PIN or password (4+ characters)" "" secret
 ask YOUTUBE_API_KEY "YouTube Data API v3 key (blank = backup search)" "" secret
 ask PUBLIC_BASE_URL "Public site address for the QR code, e.g. https://karaoke.example.ca (blank = auto)" ""
@@ -70,10 +71,10 @@ fi
 say "Starting container"
 docker compose up -d --remove-orphans
 
-say "Waiting for KaraokeQueue to report healthy…"
+say "Waiting for Karoulette to report healthy…"
 wait_healthy 60 || { warn "No health response yet. Check logs: docker compose logs -f"; exit 1; }
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-ok "KaraokeQueue v${VERSION} is running."
+ok "Karoulette v${VERSION} is running."
 echo "    TV / host screen: http://${IP:-localhost}:$(port)/host"
 echo "    Guests join at:   http://${IP:-localhost}:$(port)/join"
 

@@ -23,7 +23,7 @@ from .ws import Client, Hub
 from .youtube import SearchUnavailable, YouTubeService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-log = logging.getLogger("karaokequeue")
+log = logging.getLogger("karoulette")
 
 
 # --------------------------------------------------------------------------- request models
@@ -161,7 +161,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
         task = asyncio.create_task(ticker()) if start_ticker else None
-        log.info("KaraokeQueue v%s ready. Data: %s. Search mode: %s", settings.version, settings.data_path,
+        log.info("Karoulette v%s ready. Data: %s. Search mode: %s", settings.version, settings.data_path,
                  yt.quota_status()["mode"])
         yield
         if task:
@@ -170,7 +170,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         await upd.aclose()
         db.close()
 
-    app = FastAPI(title="KaraokeQueue", version=settings.version, lifespan=lifespan,
+    app = FastAPI(title="Karoulette", version=settings.version, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.engine, app.state.db, app.state.settings, app.state.hub = engine, db, settings, hub
 
@@ -435,7 +435,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         ev = get_event_or_404(event_id)
         safe = "".join(c if c.isalnum() else "-" for c in ev["name"]).strip("-")[:40] or "event"
         return PlainTextResponse(engine.history_csv(event_id), media_type="text/csv",
-                                 headers={"Content-Disposition": f'attachment; filename="karaokequeue-{safe}.csv"'})
+                                 headers={"Content-Disposition": f'attachment; filename="karoulette-{safe}.csv"'})
 
     # ------------------------------------------------------------------ host: themes & quota
 

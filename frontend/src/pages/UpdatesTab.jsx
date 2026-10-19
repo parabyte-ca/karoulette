@@ -72,7 +72,7 @@ export default function UpdatesTab({ push, loadedVersion }) {
     try {
       const data = await api("/api/host/updates/check", { method: "POST" });
       setS(data);
-      push(data.update_available ? `KaraokeQueue ${data.latest.version} is available.` : "KaraokeQueue is up to date.",
+      push(data.update_available ? `Karoulette ${data.latest.version} is available.` : "Karoulette is up to date.",
         data.update_available ? "gold" : "success");
     } catch (e) { push(e.message, "error"); } finally { setBusy(false); }
   };
@@ -95,7 +95,7 @@ export default function UpdatesTab({ push, loadedVersion }) {
   return (
     <section className="card">
       <h2>Updates</h2>
-      <p className="muted">KaraokeQueue checks once a day for a new release. You can upgrade from here: a helper on
+      <p className="muted">Karoulette checks once a day for a new release. You can upgrade from here: a helper on
         the server backs up the database, rebuilds, checks the new version is healthy, and goes back to this
         version if anything fails.</p>
 
@@ -109,13 +109,13 @@ export default function UpdatesTab({ push, loadedVersion }) {
 
       <div className="row wrap">
         <button className="btn" onClick={check} disabled={busy}>{busy ? "Checking…" : "Check now"}</button>
-        {!s.update_available && s.latest && <span className="success">✓ KaraokeQueue is up to date.</span>}
+        {!s.update_available && s.latest && <span className="success">✓ Karoulette is up to date.</span>}
       </div>
 
       {(running || restarting) && (
         <div className="status-box" role="status">
           <strong>
-            {restarting ? "KaraokeQueue is restarting with the new version…"
+            {restarting ? "Karoulette is restarting with the new version…"
               : u.state === "requested" ? `Upgrade to ${u.to_version} requested. The server starts it at its next check.`
                 : `Upgrading to ${u.to_version}… This takes a few minutes; you can leave this page.`}
           </strong>
@@ -148,7 +148,7 @@ export default function UpdatesTab({ push, loadedVersion }) {
             <div>
               <p>To upgrade from here, set up the upgrade helper on the server once. It runs every 15 minutes and only
                 acts when you press Upgrade. On TrueNAS it adds a cron job under System › Advanced Settings. In the
-                KaraokeQueue folder on the server, run:</p>
+                Karoulette folder on the server, run:</p>
               <Copyable value={AGENT} push={push} />
               <p className="muted small">
                 {s.helper.configured

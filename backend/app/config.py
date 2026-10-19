@@ -25,6 +25,21 @@ def normalise_base_url(value: str) -> str:
         value = trimmed
 
 
+LEGACY_DB_NAME = "karaokequeue.db"  # before the rename to Karoulette (v0.5.0)
+
+
+def migrate_legacy_db(data_path: Path) -> bool:
+    """Rename the pre-0.5.0 database (and its WAL files) to the new name, once."""
+    old, new = data_path / LEGACY_DB_NAME, data_path / "karoulette.db"
+    if not old.exists() or new.exists():
+        return False
+    for suffix in ("-wal", "-shm", ""):  # main file last, so a crash part-way is retried next start
+        src = old.with_name(old.name + suffix)
+        if src.exists():
+            src.rename(new.with_name(new.name + suffix))
+    return True
+
+
 @dataclass
 class Settings:
     data_path: Path = field(default_factory=lambda: Path(os.getenv("DATA_PATH", "/data")))
@@ -42,10 +57,11 @@ class Settings:
 
     @property
     def db_path(self) -> Path:
-        return self.data_path / "karaokequeue.db"
+        return self.data_path / "karoulette.db"
 
     def ensure(self) -> None:
         self.data_path.mkdir(parents=True, exist_ok=True)
+        migrate_legacy_db(self.data_path)
         if not self.secret_key:
             key_file = self.data_path / "secret.key"
             if not key_file.exists():

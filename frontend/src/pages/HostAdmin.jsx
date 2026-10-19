@@ -299,7 +299,7 @@ function SecurityTab({ push }) {
       )}
       <hr />
       <button className="btn" onClick={logout}>Sign out of host admin</button>
-      <p className="muted small">KaraokeQueue v{session?.version}</p>
+      <p className="muted small">Karoulette v{session?.version}</p>
     </section>
   );
 }
@@ -318,7 +318,7 @@ export default function HostAdmin() {
     <main className="page">
       <header className="page-header">
         <h1 className="brand small">
-          Karaoke<span>Queue</span> <span className="muted">admin</span>
+          Kar<span>oulette</span> <span className="muted">admin</span>
           {info.version && <span className="version-tag" title="Running version">v{info.version}</span>}
           {info.update && (
             <button className="version-tag update" onClick={() => setTab("updates")}>v{info.update} available</button>

@@ -32,7 +32,7 @@ export default function HostGate({ children }) {
   return (
     <main className="center-page">
       <form className="card narrow" onSubmit={submit}>
-        <h1 className="brand small">Karaoke<span>Queue</span></h1>
+        <h1 className="brand small">Kar<span>oulette</span></h1>
         <h2>Host sign-in</h2>
         <label className="field">
           <span>Host PIN or password</span>

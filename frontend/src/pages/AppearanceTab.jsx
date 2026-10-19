@@ -8,7 +8,7 @@ function SchemePreview({ id }) {
     <div className="mock" aria-hidden="true">
       <div className="mock-tv">
         <div className="mock-top">
-          <span className="mock-brand">Karaoke<span>Queue</span></span>
+          <span className="mock-brand">Kar<span>oulette</span></span>
           <span className="mock-round">Round 3</span>
           {id === "synthwave" || id === "aurora" ? <span className="mock-superset">★ SUPERSET · Power Ballads</span> : null}
         </div>

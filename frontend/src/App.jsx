@@ -8,7 +8,7 @@ import JoinApp from "./pages/JoinApp";
 function Landing() {
   return (
     <main className="landing">
-      <h1 className="brand">Karaoke<span>Queue</span></h1>
+      <h1 className="brand">Kar<span>oulette</span></h1>
       <p className="muted">Grab the mic. Take your turn. Sing your heart out.</p>
       <div className="landing-actions">
         <Link className="btn btn-primary btn-xl" to="/join">I'm a guest</Link>

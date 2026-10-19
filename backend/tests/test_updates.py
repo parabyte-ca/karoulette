@@ -130,3 +130,22 @@ def test_no_upgrade_folder_means_not_configured():
     upd = service(_release)
     s = upd.status()
     assert s["helper"]["configured"] is False and s["upgrade"] is None and not s["can_upgrade"]
+
+
+def test_legacy_database_is_renamed(tmp_path):
+    from app.config import migrate_legacy_db
+    (tmp_path / "karaokequeue.db").write_text("db")
+    (tmp_path / "karaokequeue.db-wal").write_text("wal")
+    assert migrate_legacy_db(tmp_path) is True
+    assert (tmp_path / "karoulette.db").read_text() == "db"
+    assert (tmp_path / "karoulette.db-wal").read_text() == "wal"
+    assert not (tmp_path / "karaokequeue.db").exists()
+    assert migrate_legacy_db(tmp_path) is False  # idempotent
+
+
+def test_legacy_database_never_overwrites_new(tmp_path):
+    from app.config import migrate_legacy_db
+    (tmp_path / "karaokequeue.db").write_text("old")
+    (tmp_path / "karoulette.db").write_text("new")
+    assert migrate_legacy_db(tmp_path) is False
+    assert (tmp_path / "karoulette.db").read_text() == "new"

@@ -24,7 +24,7 @@ import httpx
 
 from .db import Database
 
-log = logging.getLogger("karaokequeue.updates")
+log = logging.getLogger("karoulette.updates")
 
 SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 SETTING_KEY = "updates_latest"
@@ -112,7 +112,7 @@ class UpdateService:
     async def fetch_latest(self) -> dict:
         if not self.repo:
             raise UpdateError("SOURCE_REPO isn't a GitHub owner/name, so releases can't be checked")
-        headers = {"Accept": "application/vnd.github+json", "User-Agent": f"KaraokeQueue/{self.current}"}
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": f"Karoulette/{self.current}"}
         r = await self.client.get(f"https://api.github.com/repos/{self.repo}/releases/latest", headers=headers)
         if r.status_code == 200:
             data = r.json()
@@ -154,7 +154,7 @@ class UpdateService:
             log.warning("Update check failed: %s", entry["error"])
         self.db.set_setting(SETTING_KEY, entry)
         if entry.get("release") and newer(entry["release"]["version"], self.current):
-            log.info("KaraokeQueue %s is available (running %s)", entry["release"]["version"], self.current)
+            log.info("Karoulette %s is available (running %s)", entry["release"]["version"], self.current)
         return entry
 
     async def daily_check(self) -> None:
@@ -263,7 +263,7 @@ class UpdateService:
             os.replace(tmp, self.dir / "request.json")
         except OSError as exc:
             tmp.unlink(missing_ok=True)
-            raise UpdateError("KaraokeQueue can't write to the upgrade folder. "
+            raise UpdateError("Karoulette can't write to the upgrade folder. "
                               "Run sudo ./scripts/upgrade-agent.sh --install on the server.") from exc
         log.info("Upgrade to %s requested", version)
         return self.status()

@@ -41,7 +41,7 @@ function JoinForm({ initialCode, onJoined }) {
   return (
     <main className="phone center-page">
       <form className="card narrow" onSubmit={submit}>
-        <h1 className="brand small">Karaoke<span>Queue</span></h1>
+        <h1 className="brand small">Kar<span>oulette</span></h1>
         {eventName ? <h2>Join {eventName}</h2> : <h2>Join the party</h2>}
         <label className="field">
           <span>Event code</span>
@@ -263,7 +263,7 @@ function GuestHome({ me, onLeave }) {
     <div className={`phone ${superset ? "is-superset" : ""}`}>
       <header className="phone-top">
         <div>
-          <div className="brand tiny">Karaoke<span>Queue</span></div>
+          <div className="brand tiny">Kar<span>oulette</span></div>
           <div className="phone-event">{ev.name}</div>
         </div>
         <div className="phone-me">

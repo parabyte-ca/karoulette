@@ -17,10 +17,15 @@ cd "$ROOT_DIR"
 
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-DESCRIPTION="KaraokeQueue upgrade helper"
-CRON_FILE=/etc/cron.d/karaokequeue-upgrade
-SYSTEMD_TIMER=/etc/systemd/system/karaokequeue-upgrade.timer
-SYSTEMD_SERVICE=/etc/systemd/system/karaokequeue-upgrade.service
+DESCRIPTION="Karoulette upgrade helper"
+CRON_FILE=/etc/cron.d/karoulette-upgrade
+SYSTEMD_TIMER=/etc/systemd/system/karoulette-upgrade.timer
+SYSTEMD_SERVICE=/etc/systemd/system/karoulette-upgrade.service
+# Before the rename to Karoulette (v0.5.0) the schedule used these names; install/uninstall clean them up.
+LEGACY_DESCRIPTION="KaraokeQueue upgrade helper"
+LEGACY_CRON_FILE=/etc/cron.d/karaokequeue-upgrade
+LEGACY_SYSTEMD_TIMER=/etc/systemd/system/karaokequeue-upgrade.timer
+LEGACY_SYSTEMD_SERVICE=/etc/systemd/system/karaokequeue-upgrade.service
 EVERY=""
 
 cron_spec() { if (( EVERY == 1 )); then printf '*'; else printf '*/%s' "$EVERY"; fi; }
@@ -33,7 +38,7 @@ print_schedule() {
 }
 
 truenas_job_ids() {
-  midclt call cronjob.query "[[\"description\", \"=\", \"$DESCRIPTION\"]]" 2>/dev/null \
+  midclt call cronjob.query "[[\"description\", \"in\", [\"$DESCRIPTION\", \"$LEGACY_DESCRIPTION\"]]]" 2>/dev/null \
     | python3 -c 'import json,sys; print(" ".join(str(j["id"]) for j in json.load(sys.stdin)))' 2>/dev/null || true
 }
 
@@ -42,6 +47,7 @@ install_schedule() {
   EVERY="${EVERY:-15}"
   self="$(readlink -f "$0")"
   ensure_upgrade_dir
+  [[ "$mode" == print ]] || remove_legacy_schedule
   if [[ "$mode" == print ]]; then
     print_schedule "$self"
     return 0
@@ -63,8 +69,8 @@ install_schedule() {
     printf '[Unit]\nDescription=Run the %s every %s minute(s)\n\n[Timer]\nOnCalendar=*:0/%s\nAccuracySec=5s\n\n[Install]\nWantedBy=timers.target\n' \
       "$DESCRIPTION" "$EVERY" "$EVERY" > "$SYSTEMD_TIMER"
     systemctl daemon-reload
-    systemctl enable --now karaokequeue-upgrade.timer >/dev/null
-    ok "installed the karaokequeue-upgrade.timer systemd timer (every $EVERY minute(s))"
+    systemctl enable --now karoulette-upgrade.timer >/dev/null
+    ok "installed the karoulette-upgrade.timer systemd timer (every $EVERY minute(s))"
   else
     warn "no TrueNAS, cron (/etc/cron.d) or systemd found, or not running as root"
     print_schedule "$self"
@@ -73,14 +79,25 @@ install_schedule() {
   "$self" --every "$EVERY"  # check in now so Admin > Updates shows the helper as connected
 }
 
+remove_legacy_schedule() {
+  if [[ -f "$LEGACY_CRON_FILE" ]]; then rm -f -- "$LEGACY_CRON_FILE"; ok "removed the old $LEGACY_CRON_FILE"; fi
+  if [[ -f "$LEGACY_SYSTEMD_TIMER" ]]; then
+    systemctl disable --now karaokequeue-upgrade.timer >/dev/null 2>&1 || true
+    rm -f -- "$LEGACY_SYSTEMD_TIMER" "$LEGACY_SYSTEMD_SERVICE"
+    systemctl daemon-reload 2>/dev/null || true
+    ok "removed the old karaokequeue-upgrade.timer"
+  fi
+}
+
 uninstall_schedule() {
   local removed=0 id
+  remove_legacy_schedule
   if command -v midclt >/dev/null 2>&1; then
     for id in $(truenas_job_ids); do midclt call cronjob.delete "$id" >/dev/null && removed=1; done
   fi
   if [[ -f "$CRON_FILE" ]]; then rm -f -- "$CRON_FILE"; removed=1; fi
   if [[ -f "$SYSTEMD_TIMER" ]]; then
-    systemctl disable --now karaokequeue-upgrade.timer >/dev/null 2>&1 || true
+    systemctl disable --now karoulette-upgrade.timer >/dev/null 2>&1 || true
     rm -f -- "$SYSTEMD_TIMER" "$SYSTEMD_SERVICE"
     systemctl daemon-reload 2>/dev/null || true
     removed=1

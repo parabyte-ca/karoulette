@@ -28,7 +28,7 @@ export default function EventPicker() {
   return (
     <main className="page">
       <header className="page-header">
-        <h1 className="brand small">Karaoke<span>Queue</span></h1>
+        <h1 className="brand small">Kar<span>oulette</span></h1>
         <Link to="/host/admin" className="btn">Host admin</Link>
       </header>
       <section className="card">
