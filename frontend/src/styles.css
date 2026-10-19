@@ -159,6 +159,8 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 .countdown.urgent .countdown-bar div { background: var(--red); }
 @keyframes pulse { 50% { transform: scale(1.08); opacity: 0.8; } }
 .pulse { animation: pulse 1.2s infinite; }
+.overtime { color: var(--orange); font-weight: 800; margin: 0.4em 0; }
+.pass-btn { margin-top: 0.8em; white-space: normal; text-align: center; }
 
 /* ---------- TV / host screen */
 .tv { height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: clamp(16px, 1.25vw, 30px); }

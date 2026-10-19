@@ -341,7 +341,11 @@ class Engine:
         return self._round(round_id)
 
     def _advance(self, event_id: int) -> None:
-        """Start the next turn: a pending bonus re-pick first, otherwise the next guest in rotation."""
+        """Start the next turn.
+
+        Priority: a bonus re-pick (embed error), then a passed singer whose one-singer wait is
+        over, then the next guest in the fixed rotation.
+        """
         ev = self.get_event(event_id)
         if ev["status"] != "active" or ev["rotation_paused"]:
             self._set(event_id, turn_state="idle", current_turn_id=None, phase_deadline=None)
@@ -351,19 +355,28 @@ class Engine:
             self._set(event_id, turn_state="idle", current_turn_id=None, phase_deadline=None)
             return
         active_ids = {g["id"] for g in guests}
-        bonus = [b for b in ev["bonus_queue"] if b["guest_id"] in active_ids]
+        pending = [b for b in ev["bonus_queue"] if b["guest_id"] in active_ids]
+        for b in pending:
+            # If the singer they let go first has left, the wait is over.
+            if b.get("kind") == "deferred" and b.get("after_guest_id") not in active_ids:
+                b["ready"] = True
+        entry = next((b for b in pending if b.get("kind") != "deferred" or b.get("ready")), None)
         now = self.clock()
         cfg = ev["config"]
 
-        if bonus:
-            entry = bonus.pop(0)
-            self._set(event_id, bonus_queue=bonus)
+        if entry:
+            pending.remove(entry)
             if ev["current_round_id"] is None:
                 self._start_round(event_id)
                 ev = self.get_event(event_id)
             guest = next(g for g in guests if g["id"] == entry["guest_id"])
-            theme = self._theme(entry.get("theme_id"))
-            is_bonus = True
+            if entry.get("kind") == "deferred":
+                # Their regular turn, just moved one singer later. Rotation cursor stays put.
+                theme = self._turn_theme(event_id)
+                is_bonus = False
+            else:
+                theme = self._theme(entry.get("theme_id"))
+                is_bonus = True
         else:
             guest, wrapped, skipped = logic.next_in_rotation(guests, ev["cursor_pos"])
             for gid in skipped:
@@ -373,13 +386,14 @@ class Engine:
             if wrapped or ev["current_round_id"] is None:
                 self._start_round(event_id)
             ev = self.get_event(event_id)
-            rnd = self._round(ev["current_round_id"])
-            if rnd["is_superset"]:
-                theme = self._theme(rnd["superset_theme_id"])
-            else:
-                theme = self._pick_theme(event_id)
+            theme = self._turn_theme(event_id)
             self._set(event_id, cursor_pos=guest["rotation_pos"])
             is_bonus = False
+
+        for b in pending:
+            if b.get("kind") == "deferred" and b.get("after_guest_id") == guest["id"]:
+                b["ready"] = True
+        self._set(event_id, bonus_queue=pending)
 
         turn_id = self.db.insert(
             "INSERT INTO turns(event_id, round_id, guest_id, theme_id, theme_name, is_bonus, started_at) "
@@ -394,6 +408,41 @@ class Engine:
             self.emit(event_id, "your_turn", {"bonus": True}, guest_id=guest["id"])
         if int(cfg["announce_seconds"]) == 0:
             self.tick(now)
+
+    def _turn_theme(self, event_id: int) -> dict | None:
+        ev = self.get_event(event_id)
+        rnd = self._round(ev["current_round_id"])
+        if rnd and rnd["is_superset"]:
+            return self._theme(rnd["superset_theme_id"])
+        return self._pick_theme(event_id)
+
+    def _next_singer_preview(self, ev: dict, exclude_id: int) -> dict | None:
+        """Who would pick next if ``exclude_id`` stepped aside right now."""
+        guests = [g for g in self._guests(ev["id"]) if g["id"] != exclude_id]
+        by_id = {g["id"]: g for g in guests}
+        for b in ev["bonus_queue"]:
+            if b["guest_id"] in by_id and (b.get("kind") != "deferred" or b.get("ready")):
+                return by_id[b["guest_id"]]
+        guest, _, _ = logic.next_in_rotation(guests, ev["cursor_pos"])
+        return guest
+
+    def pass_turn(self, guest_id: int) -> None:
+        """The singer lets the next person go first and picks right after them."""
+        guest = self._guest(guest_id)
+        ev = self.get_event(guest["event_id"])
+        turn = self._turn(ev["current_turn_id"])
+        if ev["status"] != "active" or not turn or turn["guest_id"] != guest_id or turn["outcome"] is not None:
+            raise EngineError("It isn't your turn right now.", 409)
+        after = self._next_singer_preview(ev, guest_id)
+        if not after:
+            raise EngineError("There's nobody else to go ahead of you. Pick a song when you're ready!", 409)
+        self._close_turn(ev, "passed")
+        pending = [b for b in ev["bonus_queue"] if b["guest_id"] != guest_id]
+        pending.append({"guest_id": guest_id, "kind": "deferred", "after_guest_id": after["id"], "ready": False})
+        self._set(ev["id"], bonus_queue=pending)
+        self.notice(ev["id"], f"{guest['display_name']} passed. {after['display_name']} goes first, "
+                              f"then {guest['display_name']} picks.")
+        self._advance(ev["id"])
 
     def _needs_spin(self, ev: dict, turn: dict) -> bool:
         if turn["is_bonus"]:
@@ -440,12 +489,13 @@ class Engine:
             elif ev["turn_state"] == "spinning":
                 self._enter_choosing(ev, turn, now)
             elif ev["turn_state"] == "choosing":
+                # Time's up, but nobody loses their turn: they keep picking until they add a
+                # song or choose to pass. The host can still skip them.
                 guest = self._guest(turn["guest_id"])
-                self._close_turn(ev, "timeout")
-                self.notice(ev["id"], f"Time's up for {guest['display_name']}. Moving on to the next singer.",
-                            "warning")
-                self.emit(ev["id"], "turn_timeout", {"guest_id": guest["id"]}, guest_id=guest["id"])
-                self._advance(ev["id"])
+                self._set(ev["id"], turn_state="overtime", phase_deadline=None)
+                self.notice(ev["id"], f"{guest['display_name']}'s time is up, but they can still pick a song "
+                                      "or pass.", "warning")
+                self.emit(ev["id"], "turn_overtime", {"guest_id": guest["id"]}, guest_id=guest["id"])
         return changed
 
     def pause_rotation(self, event_id: int) -> None:
@@ -523,7 +573,7 @@ class Engine:
         if ev["status"] != "active":
             raise EngineError("The event isn't running right now")
         turn = self._turn(ev["current_turn_id"])
-        if not turn or turn["guest_id"] != guest_id or ev["turn_state"] not in ("spinning", "choosing"):
+        if not turn or turn["guest_id"] != guest_id or ev["turn_state"] not in ("spinning", "choosing", "overtime"):
             raise EngineError("It isn't your turn yet. Hang tight!", 409)
         if ev["config"]["prevent_duplicates"] and logic.is_duplicate(self._items(ev["id"]), video["video_id"]):
             raise EngineError("That song has already been sung or queued tonight. Pick another!", 409)
@@ -707,7 +757,8 @@ class Engine:
                     {"id": None, "name": turn["theme_name"], "description": ""} if turn["theme_name"] else None)),
                 "deadline": deadline, "remaining": max(0.0, deadline - now) if deadline else ev["paused_remaining"],
             }
-        upcoming = logic.upcoming_order(active, ev["cursor_pos"], exclude_id=turn["guest_id"] if turn else None)
+        upcoming = logic.upcoming_order(active, ev["cursor_pos"], exclude_id=turn["guest_id"] if turn else None,
+                                        pending=ev["bonus_queue"])
         return {
             "server_time": now,
             "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"], "status": ev["status"],
@@ -720,6 +771,8 @@ class Engine:
                         "skip_next": bool(g["skip_next"])} for g in active],
             "upcoming": upcoming,
             "bonus_queue": [b["guest_id"] for b in ev["bonus_queue"]],
+            "passed": [{"guest_id": b["guest_id"], "after_guest_id": b.get("after_guest_id"), "ready": b.get("ready")}
+                       for b in ev["bonus_queue"] if b.get("kind") == "deferred"],
             "queue": queue,
             "now_playing": item_out(playing) if playing else None,
             "recent": recent,

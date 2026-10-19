@@ -77,8 +77,7 @@ def test_engine_rotation_in_join_order(engine, clock, make_event):
         ev = to_choosing(engine, clock)
         turn = engine._turn(ev["current_turn_id"])
         order.append(turn["guest_id"])
-        clock.advance(91)
-        engine.tick()
+        engine.skip_turn(eid)
     ids = [x["id"] for x in guests]
     assert order == ids + ids
     assert engine.get_event(eid)["current_round"] == 3
@@ -91,7 +90,7 @@ def test_late_joiner_goes_to_end(engine, clock, make_event):
     assert engine._turn(ev["current_turn_id"])["guest_id"] == guests[0]["id"]
     seen = []
     for _ in range(3):
-        clock.advance(91); engine.tick()
+        engine.skip_turn(eid)
         ev = to_choosing(engine, clock)
         seen.append(engine._turn(ev["current_turn_id"])["guest_id"])
     assert seen == [guests[1]["id"], late["id"], guests[0]["id"]]
@@ -106,14 +105,103 @@ def test_queueing_a_song_advances_turn(engine, clock, make_event):
     assert ev["turn_state"] == "announcing"
 
 
-def test_timeout_skips_with_notice(engine, clock, make_event):
-    eid, guests = make_event(turn_seconds=30)
+def test_default_turn_timer_is_three_minutes():
+    assert logic.DEFAULT_EVENT_CONFIG["turn_seconds"] == 180
+
+
+def test_timer_expiry_does_not_skip(engine, clock, make_event):
+    eid, guests = make_event(turn_seconds=180)
     to_choosing(engine, clock)
-    clock.advance(31)
+    clock.advance(181)
     engine.tick()
     msgs = engine.drain()
-    assert any(m["message"]["type"] == "notice" and "Time's up" in m["message"]["data"]["text"] for m in msgs)
+    assert any(m["message"]["type"] == "turn_overtime" for m in msgs)
+    ev = engine.get_event(eid)
+    assert ev["turn_state"] == "overtime" and ev["phase_deadline"] is None
+    clock.advance(3600)
+    engine.tick()
+    assert engine._turn(engine.get_event(eid)["current_turn_id"])["guest_id"] == guests[0]["id"]
+    # They can still queue in overtime, and that moves things on.
+    engine.queue_song(guests[0]["id"], video(1))
     assert engine._turn(engine.get_event(eid)["current_turn_id"])["guest_id"] == guests[1]["id"]
+
+
+_song_ids = iter(range(100, 10_000))
+
+
+def _who_picks(engine, clock, eid, n):
+    order = []
+    for _ in range(n):
+        ev = to_choosing(engine, clock)
+        gid = engine._turn(ev["current_turn_id"])["guest_id"]
+        order.append(gid)
+        engine.queue_song(gid, video(next(_song_ids)))
+    return order
+
+
+def test_pass_lets_exactly_one_singer_ahead(engine, clock, make_event):
+    eid, guests = make_event(names=("Alex", "Blake", "Casey", "Devon"))
+    a, b, c, d = (g["id"] for g in guests)
+    to_choosing(engine, clock)
+    engine.pass_turn(a)
+    snap = engine.snapshot(eid)
+    assert snap["turn"]["guest_id"] == b
+    assert snap["upcoming"][:3] == [a, c, d]
+    assert _who_picks(engine, clock, eid, 6) == [b, a, c, d, a, b]
+    assert engine.get_event(eid)["current_round"] == 2
+
+
+def test_pass_in_overtime(engine, clock, make_event):
+    eid, guests = make_event()
+    a, b, c = (g["id"] for g in guests)
+    to_choosing(engine, clock)
+    clock.advance(500)
+    engine.tick()
+    engine.pass_turn(a)
+    assert _who_picks(engine, clock, eid, 3) == [b, a, c]
+
+
+def test_passing_again_moves_down_one_more(engine, clock, make_event):
+    eid, guests = make_event(names=("Alex", "Blake", "Casey", "Devon"))
+    a, b, c, d = (g["id"] for g in guests)
+    to_choosing(engine, clock)
+    engine.pass_turn(a)
+    assert _who_picks(engine, clock, eid, 1) == [b]
+    ev = to_choosing(engine, clock)
+    assert engine._turn(ev["current_turn_id"])["guest_id"] == a
+    engine.pass_turn(a)
+    assert _who_picks(engine, clock, eid, 3) == [c, a, d]
+
+
+def test_pass_when_next_singer_leaves(engine, clock, make_event):
+    eid, guests = make_event()
+    a, b, c = (g["id"] for g in guests)
+    to_choosing(engine, clock)
+    engine.pass_turn(a)
+    engine.leave(b)  # B was up; A's wait is over
+    assert engine._turn(engine.get_event(eid)["current_turn_id"])["guest_id"] == a
+
+
+def test_pass_rejected_when_alone_or_not_your_turn(engine, clock, make_event):
+    import pytest
+    from app.engine import EngineError
+    eid, guests = make_event(names=("Solo",))
+    to_choosing(engine, clock)
+    with pytest.raises(EngineError):
+        engine.pass_turn(guests[0]["id"])
+    eid2 = engine.create_event("Other", {})["id"]
+    x, _ = engine.join(eid2, "X")
+    engine.join(eid2, "Y")
+    engine.start_event(eid2)
+    y = engine.db.one("SELECT id FROM guests WHERE display_name = 'Y'")["id"]
+    with pytest.raises(EngineError):
+        engine.pass_turn(y)
+
+
+def test_upcoming_with_pending_pass():
+    guests = [g(1, 1), g(2, 2), g(3, 3)]
+    pending = [{"guest_id": 1, "kind": "deferred", "after_guest_id": 2, "ready": False}]
+    assert logic.upcoming_order(guests, 1, exclude_id=None, pending=pending) == [2, 1, 3, 1]
 
 
 def test_current_guest_leaving_advances(engine, clock, make_event):

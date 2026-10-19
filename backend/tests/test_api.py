@@ -115,3 +115,19 @@ def test_themes_crud(client):
     upd = client.put(f"/api/host/themes/{t['id']}", json={"name": "Disco", "enabled": False}).json()
     assert upd["enabled"] is False
     assert client.delete(f"/api/host/themes/{t['id']}").status_code == 200
+
+
+def test_guest_pass_endpoint(client):
+    login(client)
+    created = client.post("/api/host/events", json={"name": "Pass", "config": {"announce_seconds": 0,
+                                                                               "superset_chance": 0}}).json()
+    a = client.post("/api/guest/join", json={"code": created["join_code"], "name": "A"}).json()
+    b = client.post("/api/guest/join", json={"code": created["join_code"], "name": "B"}).json()
+    client.post(f"/api/host/events/{created['id']}/actions/start")
+    ha = {"Authorization": f"Bearer {a['token']}"}
+    hb = {"Authorization": f"Bearer {b['token']}"}
+    assert client.post("/api/guest/pass", headers=hb).status_code == 409
+    assert client.post("/api/guest/pass", headers=ha).status_code == 200
+    state = client.get("/api/guest/state", headers=ha).json()
+    assert state["turn"]["guest_id"] == b["guest"]["id"]
+    assert state["upcoming"][0] == a["guest"]["id"]

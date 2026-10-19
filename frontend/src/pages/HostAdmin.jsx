@@ -160,7 +160,7 @@ function EventSettings({ eventId, push, onChanged }) {
         <div className="grid">
           <label className="field"><span>Event name</span>
             <input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} /></label>
-          {field("turn_seconds", "Turn timer (seconds)", { type: "number", min: 15, max: 600 })}
+          {field("turn_seconds", "Turn timer (seconds, a guide: nobody is skipped when it runs out)", { type: "number", min: 15, max: 600 })}
           {field("superset_chance", "Superset chance per round (%)", { type: "number", min: 0, max: 100 })}
           {field("recent_theme_window", "Avoid themes used in the last N turns", { type: "number", min: 0, max: 20 })}
           {field("max_duration_s", "Longest video allowed (seconds, 0 = no limit)", { type: "number", min: 0, max: 3600 })}

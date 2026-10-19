@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0] - 2026-10-19
+### Added
+- Guests can pass ("Let the next singer go first"): exactly one singer goes ahead, then the passer picks, then the rotation continues. Passing again moves them down one more.
+- Overtime state when the turn timer runs out, shown on the TV and the singer's phone.
+- Singing order on phones shows passed singers in their new spot.
+
+### Changed
+- Turn timer default is now 3 minutes (180 s) and is a guide only: singers are no longer skipped when it reaches zero. The host can still use Skip turn. Existing events keep their saved timer; change it in Host admin → Events.
+
 ## [0.1.0] - 2026-10-19
 ### Added
 - Initial release of KaraokeQueue.

@@ -10,7 +10,7 @@ import unicodedata
 from typing import Iterable, Sequence
 
 DEFAULT_EVENT_CONFIG: dict = {
-    "turn_seconds": 90,
+    "turn_seconds": 180,
     "superset_chance": 0.15,
     "recent_theme_window": 3,
     "prevent_duplicates": True,
@@ -85,15 +85,32 @@ def next_in_rotation(guests: Sequence[dict], cursor_pos: int | None):
     return guest, wrapped, skipped
 
 
-def upcoming_order(guests: Sequence[dict], cursor_pos: int | None, exclude_id: int | None = None) -> list[int]:
-    """Guest ids in the order they will sing after the current cursor."""
+def upcoming_order(guests: Sequence[dict], cursor_pos: int | None, exclude_id: int | None = None,
+                   pending: Sequence[dict] = ()) -> list[int]:
+    """Guest ids in the order they will pick next.
+
+    ``pending`` holds bonus re-picks and passed singers ({guest_id, kind, after_guest_id, ready}).
+    Ready entries come first; a passed singer who is still waiting slots in right after the
+    singer they let go ahead. A guest may appear twice (a moved turn and their next regular one).
+    """
     order = ordered_active(guests)
+    active = {g["id"] for g in order}
     if cursor_pos is None:
         seq = order
     else:
         seq = [g for g in order if g["rotation_pos"] > cursor_pos] + \
               [g for g in order if g["rotation_pos"] <= cursor_pos]
-    return [g["id"] for g in seq if g["id"] != exclude_id]
+    pending = [p for p in pending if p["guest_id"] in active]
+    head = [p["guest_id"] for p in pending
+            if p.get("kind") != "deferred" or p.get("ready") or p.get("after_guest_id") not in active]
+    waiting = [p for p in pending if p["guest_id"] not in head and p.get("kind") == "deferred"]
+    out = list(head)
+    for g in seq:
+        if g["id"] == exclude_id:
+            continue
+        out.append(g["id"])
+        out.extend(p["guest_id"] for p in waiting if p.get("after_guest_id") == g["id"])
+    return out
 
 
 def next_rotation_pos(guests: Iterable[dict]) -> int:

@@ -25,11 +25,11 @@
 | Table | Key columns |
 |---|---|
 | `settings` | `key` PK, `value` (JSON) — host PIN hash (bcrypt), global defaults |
-| `events` | `id`, `name`, `join_code` (6 chars, unique, no ambiguous letters), `status` (draft/active/paused/ended), `created_at`, `started_at`, `ended_at`, `config` JSON (turn_seconds=90, superset_chance=0.15, recent_theme_window=3, prevent_duplicates=true, safe_search="moderate"), `current_round`, `current_turn_guest_id`, `turn_deadline`, `turn_state` (announcing/spinning/choosing/idle), `superset_pending` (null/force/cancel), `rotation_paused`, `now_playing_item_id` |
+| `events` | `id`, `name`, `join_code` (6 chars, unique, no ambiguous letters), `status` (draft/active/paused/ended), `created_at`, `started_at`, `ended_at`, `config` JSON (turn_seconds=180, superset_chance=0.15, recent_theme_window=3, prevent_duplicates=true, safe_search="moderate"), `current_round`, `current_turn_guest_id`, `turn_deadline`, `turn_state` (announcing/spinning/choosing/overtime/idle), `superset_pending` (null/force/cancel), `rotation_paused`, `now_playing_item_id` |
 | `guests` | `id`, `event_id`, `display_name`, `token_hash`, `rotation_pos` (int, join order), `status` (active/left/removed), `joined_at`, `skip_next` bool |
 | `themes` | `id`, `name`, `description`, `weight` (default 1), `enabled`, `created_at` (global, shared across events) |
 | `rounds` | `id`, `event_id`, `number`, `is_superset`, `superset_theme_id`, `started_at` |
-| `turns` | `id`, `event_id`, `round_id`, `guest_id`, `theme_id`, `outcome` (queued/timeout/skipped/removed), `started_at`, `ended_at` |
+| `turns` | `id`, `event_id`, `round_id`, `guest_id`, `theme_id`, `outcome` (queued/passed/skipped/removed/left), `started_at`, `ended_at` |
 | `queue_items` | `id`, `event_id`, `guest_id`, `turn_id`, `video_id`, `title`, `channel`, `duration_s`, `thumbnail`, `position` (float for cheap reorder), `status` (queued/playing/played/skipped/removed/error), `off_theme_flags` int, `added_at`, `played_at` |
 | `flags` | `queue_item_id`, `flagged_by` (guest id or "host"), unique pair |
 | `search_cache` | `query_norm` PK, `results` JSON, `source` (api/ytdlp), `fetched_at` (24 h TTL) |
@@ -42,7 +42,7 @@
 
 **Rotation:** active guests ordered by `rotation_pos`. Next guest = first active guest with `rotation_pos` > current; wrap → new round. Late joiners get `max(pos)+1` (end of order). Leaving/removed guests are skipped; if the current guest leaves, the turn advances immediately.
 
-**Turn lifecycle:** `announcing` (3 s, host shows "Up: Alex") → `spinning` (theme spin, ~4 s animation; result pushed to phone) → `choosing` (deadline = now + turn_seconds) → song queued **or** timeout (notice: "Alex's turn timed out") → next guest. Rotation paused = timer frozen (remaining time stored), no advance.
+**Turn lifecycle:** `announcing` (3 s, host shows "Up: Alex") → `spinning` (theme spin, ~4 s animation; result pushed to phone) → `choosing` (deadline = now + turn_seconds) → `overtime` when the 3-minute guide timer runs out (no skip; notice only) → song queued, guest **passes**, or host skips → next guest. A pass adds a `deferred` entry to `bonus_queue` (`after_guest_id` = whoever picks next); once that singer's turn starts the entry is ready and the passer picks next, without moving the rotation cursor. Rotation paused = timer frozen (remaining time stored), no advance.
 
 **Theme pick:** weighted random over enabled themes, excluding the previous theme (hard) and the last *N* themes (soft — relaxed if it would leave nothing).
 

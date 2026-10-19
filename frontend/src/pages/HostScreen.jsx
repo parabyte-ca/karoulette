@@ -184,6 +184,12 @@ export default function HostScreen() {
                      total={ev.config.turn_seconds} paused={ev.rotation_paused} />
         </>
       )}
+      {turn.state === "overtime" && (
+        <>
+          {turn.theme && <div className={`theme-pill ${superset ? "superset" : ""}`}>{turn.theme.name}</div>}
+          <div className="turn-sub">is still choosing <span className="overtime">⏱ overtime</span></div>
+        </>
+      )}
     </div>
   ) : (
     <div className="turn-panel">
