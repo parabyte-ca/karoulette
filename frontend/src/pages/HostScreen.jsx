@@ -262,26 +262,19 @@ export default function HostScreen() {
         <aside className="tv-side">
           {!(idle && turn && (turn.state === "spinning" || turn.state === "announcing")) && turnPanel}
 
-          <div className="side-card">
-            <div className="label">Up next</div>
-            {upNext ? (
-              <div className="up-next">
-                <div className="now-name">{upNext.guest_name}</div>
-                <div className="muted">{decodeEntities(upNext.title)}</div>
-              </div>
-            ) : <div className="muted">Nothing queued yet</div>}
-          </div>
-
           <div className="side-card grow">
-            <div className="label">Queue ({state.queue.length})</div>
+            <div className="label">Up next · Queue ({state.queue.length})</div>
+            {!upNext && <div className="muted">Nothing queued yet</div>}
             <ol className="queue">
               {state.queue.map((item, idx) => (
-                <li key={item.id} className="queue-item">
+                <li key={item.id} className={`queue-item ${idx === 0 ? "next" : ""}`}>
                   <img src={item.thumbnail} alt="" loading="lazy" />
                   <div className="q-text">
                     <div className="q-title">{decodeEntities(item.title)}</div>
                     <div className="q-meta">
-                      {item.guest_name} · {formatDuration(item.duration_s)}
+                      {idx === 0 && <span className="next-tag">Up next</span>}
+                      <span className="q-singer">{item.guest_name}</span>
+                      {item.duration_s ? ` · ${formatDuration(item.duration_s)}` : ""}
                       {item.is_superset && item.flags > 0 && <span className="flag-badge">⚑ {item.flags}</span>}
                     </div>
                   </div>

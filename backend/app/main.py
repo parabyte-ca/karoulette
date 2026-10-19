@@ -18,6 +18,7 @@ from .config import Settings
 from .db import Database
 from .engine import Engine, EngineError
 from .ratelimit import RateLimiter
+from .updates import UpdateError, UpdateService
 from .ws import Client, Hub
 from .youtube import SearchUnavailable, YouTubeService
 
@@ -73,6 +74,10 @@ class ReorderIn(BaseModel):
     ids: list[int] = Field(max_length=1000)
 
 
+class UpgradeIn(BaseModel):
+    version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
+
+
 class PlayerIn(BaseModel):
     item_id: int
     state: str = Field(pattern=r"^(ended|error)$")
@@ -90,7 +95,7 @@ EVENT_ACTIONS: dict[str, str] = {
 # --------------------------------------------------------------------------- app factory
 
 def create_app(settings: Settings | None = None, start_ticker: bool = True,
-               youtube: YouTubeService | None = None) -> FastAPI:
+               youtube: YouTubeService | None = None, updates: UpdateService | None = None) -> FastAPI:
     settings = settings or Settings()
     settings.ensure()
     db = Database(settings.db_path)
@@ -98,6 +103,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     engine.seed_themes()
     auth.init_pin(db, settings.host_pin)
     yt = youtube or YouTubeService(db, settings.youtube_api_key, settings.youtube_daily_quota, settings.enable_ytdlp)
+    upd = updates or UpdateService(db, settings.version, settings.source_repo, settings.upgrade_dir)
     hub = Hub()
     lock = asyncio.Lock()
     limits = {
@@ -142,6 +148,8 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
                 loop_time = asyncio.get_running_loop().time()
                 if loop_time > purge_at:
                     yt.purge_cache()
+                    if settings.update_check:
+                        await upd.daily_check()
                     purge_at = loop_time + 3600
             except Exception:  # keep the ticker alive no matter what
                 log.exception("Ticker error")
@@ -155,6 +163,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         if task:
             task.cancel()
         await yt.aclose()
+        await upd.aclose()
         db.close()
 
     app = FastAPI(title="KaraokeQueue", version=settings.version, lifespan=lifespan,
@@ -446,6 +455,21 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     @app.get("/api/host/quota", dependencies=host)
     async def quota():
         return yt.quota_status()
+
+    @app.get("/api/host/updates", dependencies=host)
+    async def updates_status():
+        return upd.status()
+
+    @app.post("/api/host/updates/check", dependencies=host)
+    async def updates_check():
+        return await upd.check_now()
+
+    @app.post("/api/host/updates/upgrade", dependencies=host)
+    async def updates_upgrade(body: UpgradeIn):
+        try:
+            return upd.request_upgrade(body.version)
+        except UpdateError as exc:
+            raise HTTPException(exc.status, exc.message) from exc
 
     @app.get("/api/public/themes")
     async def public_themes():

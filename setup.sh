@@ -1,38 +1,24 @@
 #!/usr/bin/env bash
 # KaraokeQueue first-time install. Idempotent: safe to re-run.
-# Usage: ./setup.sh                 (interactive)
-#        HOST_PIN=1234 ./setup.sh -y (non-interactive; values come from env or defaults)
+# Usage: ./setup.sh                  (interactive)
+#        HOST_PIN=1234 ./setup.sh -y  (non-interactive; values come from the environment or defaults)
 set -euo pipefail
+# shellcheck source=scripts/lib.sh
+source "$(dirname "$(readlink -f "$0")")/scripts/lib.sh"
+cd "$ROOT_DIR"
 
-PROJECT="karaokequeue"
-cd "$(dirname "$0")"
 VERSION="$(cat VERSION 2>/dev/null || echo latest)"
 NONINTERACTIVE=0
 [[ "${1:-}" == "-y" || "${1:-}" == "--non-interactive" ]] && NONINTERACTIVE=1
-
-say()  { printf '\033[1;35m==>\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m!!\033[0m %s\n' "$*"; }
-die()  { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v docker >/dev/null || die "Docker is not installed."
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 ('docker compose') is required."
 
 say "Setting up KaraokeQueue v${VERSION}"
-
 [[ -f .env ]] || { cp .env.example .env; say "Created .env from .env.example"; }
 
-get_env() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- || true; }
-set_env() {
-  local key="$1" value="$2"
-  if grep -qE "^${key}=" .env; then
-    # Use a delimiter unlikely to appear in values.
-    sed -i.bak "s|^${key}=.*|${key}=${value//|/\\|}|" .env && rm -f .env.bak
-  else
-    echo "${key}=${value}" >> .env
-  fi
-}
 ask() {
-  # ask KEY "Prompt" default [secret]
+  # ask KEY "Prompt" default [secret] -> environment value, else current .env value, else default
   local key="$1" prompt="$2" default="$3" secret="${4:-}" current value
   current="${!key:-$(get_env "$key")}"
   [[ -n "$current" ]] && default="$current"
@@ -52,27 +38,27 @@ ask KQ_PORT "Host port" "8095"
 ask KQ_DATA_DIR "Data folder (TrueNAS: /mnt/<pool>/apps/karaokequeue)" "./data"
 ask HOST_PIN "Host PIN or password (4+ characters)" "" secret
 ask YOUTUBE_API_KEY "YouTube Data API v3 key (blank = backup search)" "" secret
-ask PUBLIC_BASE_URL "Public URL for the QR code (blank = auto)" ""
+ask PUBLIC_BASE_URL "Public site address for the QR code, e.g. https://karaoke.example.ca (blank = auto)" ""
 
 PIN="$(get_env HOST_PIN)"
 [[ ${#PIN} -ge 4 ]] || die "HOST_PIN must be at least 4 characters. Edit .env and re-run."
 if [[ -z "$(get_env SECRET_KEY)" ]]; then
   set_env SECRET_KEY "$(head -c 48 /dev/urandom | base64 | tr -d '\n/+=' | cut -c1-48)"
-  say "Generated SECRET_KEY"
+  ok "generated SECRET_KEY"
 fi
+[[ -n "$(get_env KQ_UPGRADE_FOLDER)" ]] || set_env KQ_UPGRADE_FOLDER "./upgrade"
 chmod 600 .env
 
-DATA_DIR="$(get_env KQ_DATA_DIR)"
-PUID="$(get_env PUID)"; PUID="${PUID:-568}"
-PGID="$(get_env PGID)"; PGID="${PGID:-568}"
+DATA_DIR="$(abs_path "$(get_env KQ_DATA_DIR)")"
 mkdir -p "$DATA_DIR"
-if [[ "$(stat -c '%u' "$DATA_DIR")" != "$PUID" ]]; then
-  say "Setting owner of $DATA_DIR to $PUID:$PGID"
-  chown "$PUID:$PGID" "$DATA_DIR" 2>/dev/null || sudo chown "$PUID:$PGID" "$DATA_DIR" \
-    || warn "Couldn't chown $DATA_DIR. Make sure UID $PUID can write to it."
+if [[ "$(stat -c '%u' "$DATA_DIR")" != "$(puid)" ]]; then
+  say "Setting owner of $DATA_DIR to $(puid):$(pgid)"
+  chown "$(puid):$(pgid)" "$DATA_DIR" 2>/dev/null || sudo chown "$(puid):$(pgid)" "$DATA_DIR" \
+    || warn "Couldn't chown $DATA_DIR. Make sure UID $(puid) can write to it."
 fi
+ensure_upgrade_dir
 
-IMAGE="$(get_env KQ_IMAGE)"; IMAGE="${IMAGE:-parabyte-ca/$PROJECT}"
+IMAGE="$(image)"
 if [[ "$IMAGE" == ghcr.io/* ]]; then
   say "Pulling $IMAGE"
   docker compose pull
@@ -84,17 +70,23 @@ fi
 say "Starting container"
 docker compose up -d --remove-orphans
 
-PORT="$(get_env KQ_PORT)"
 say "Waiting for KaraokeQueue to report healthy…"
-for _ in $(seq 1 30); do
-  if curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
-    IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-    say "KaraokeQueue v${VERSION} is running."
-    echo "    TV / host screen: http://${IP:-localhost}:${PORT}/host"
-    echo "    Guests join at:   http://${IP:-localhost}:${PORT}/join"
-    exit 0
-  fi
-  sleep 2
-done
-warn "No health response yet. Check logs: docker compose logs -f"
-exit 1
+wait_healthy 60 || { warn "No health response yet. Check logs: docker compose logs -f"; exit 1; }
+IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+ok "KaraokeQueue v${VERSION} is running."
+echo "    TV / host screen: http://${IP:-localhost}:$(port)/host"
+echo "    Guests join at:   http://${IP:-localhost}:$(port)/join"
+
+# Upgrades from Host admin > Updates need the host helper on a schedule (root, every 15 minutes).
+INSTALL_AGENT="${INSTALL_AGENT:-}"
+if [[ -z "$INSTALL_AGENT" && $NONINTERACTIVE -eq 0 ]]; then
+  read -r -p "Allow one-click upgrades from Host admin > Updates (installs a 15-minute root cron job)? [Y/n]: " INSTALL_AGENT
+  INSTALL_AGENT="${INSTALL_AGENT:-y}"
+fi
+case "${INSTALL_AGENT,,}" in
+  y|yes|1|true)
+    if [[ "$(id -u)" == 0 ]]; then "$ROOT_DIR/scripts/upgrade-agent.sh" --install
+    else sudo "$ROOT_DIR/scripts/upgrade-agent.sh" --install || warn "Run later: sudo ./scripts/upgrade-agent.sh --install"
+    fi ;;
+  *) say "Skipped. Enable later with: sudo ./scripts/upgrade-agent.sh --install" ;;
+esac

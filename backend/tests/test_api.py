@@ -131,3 +131,11 @@ def test_guest_pass_endpoint(client):
     state = client.get("/api/guest/state", headers=ha).json()
     assert state["turn"]["guest_id"] == b["guest"]["id"]
     assert state["upcoming"][0] == a["guest"]["id"]
+
+
+def test_updates_endpoints_need_host(client):
+    assert client.get("/api/host/updates").status_code == 401
+    login(client)
+    body = client.get("/api/host/updates").json()
+    assert body["current"] and body["helper"]["configured"] is False
+    assert client.post("/api/host/updates/upgrade", json={"version": "bad"}).status_code == 422

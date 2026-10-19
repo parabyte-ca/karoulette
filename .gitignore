@@ -21,3 +21,6 @@ secret.key
 .DS_Store
 .idea/
 .vscode/
+
+# Upgrade helper folder
+upgrade/
