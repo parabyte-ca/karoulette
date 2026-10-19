@@ -31,6 +31,8 @@ SEED_THEMES = [
     ("One-Hit Wonders", "Artists famous for exactly one song.", 1.0),
 ]
 ACTIVE_QUEUE_STATUSES = ("queued", "playing")
+COLOUR_SCHEMES = ("neon", "onair", "synthwave", "velvet", "aurora")
+DEFAULT_SCHEME = "neon"
 
 
 class EngineError(Exception):
@@ -777,7 +779,18 @@ class Engine:
             "now_playing": item_out(playing) if playing else None,
             "recent": recent,
             "theme_history": history,
+            "appearance": self.appearance(),
         }
+
+    def appearance(self) -> dict:
+        scheme = self.db.get_setting("colour_scheme", DEFAULT_SCHEME)
+        return {"scheme": scheme if scheme in COLOUR_SCHEMES else DEFAULT_SCHEME}
+
+    def set_scheme(self, scheme: str) -> dict:
+        if scheme not in COLOUR_SCHEMES:
+            raise EngineError(f"Unknown colour scheme. Choose one of: {', '.join(COLOUR_SCHEMES)}")
+        self.db.set_setting("colour_scheme", scheme)
+        return self.appearance()
 
     def history_csv(self, event_id: int) -> str:
         ev = self.get_event(event_id)

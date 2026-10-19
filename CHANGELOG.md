@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0] - 2026-10-19
+### Added
+- Five colour schemes, chosen in Host admin → Appearance and pushed live to the TV and every phone: Neon Night (the original), On Air, Synthwave Sunset, Velvet Lounge and Northern Lights. Each has its own background treatment (studio key light and scanlines, sun-and-grid horizon, velvet curtains, drifting aurora) and display font.
+- Appearance tab with a live mini-mockup of the TV and phone for each scheme.
+- `GET /api/public/appearance`, `PUT /api/host/appearance`; the scheme is also part of the live event state.
+
+### Changed
+- The stylesheet now uses semantic design tokens (`schemes.css`), so new schemes are a single token block.
+- The "Scan to join" text on the idle TV sits on its own panel so it stays readable over any background.
+
 ## [0.3.0] - 2026-10-19
 ### Added
 - Host admin shows the running version, plus a gold badge when a newer release is out.

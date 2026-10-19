@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, guestSession } from "../lib/api";
+import { applyScheme } from "../lib/schemes";
 import { useEventSocket } from "../lib/useEventSocket";
 import { decodeEntities, formatDuration } from "../lib/format";
 import ThemeSpinner from "../components/ThemeSpinner";
@@ -164,6 +165,7 @@ function GuestHome({ me, onLeave }) {
   const { state, connected, serverNow } = useEventSocket(me.event.join_code, {
     token: guestSession.token, onMessage, onAuthError: onLeave,
   });
+  useEffect(() => { if (state?.appearance) applyScheme(state.appearance.scheme); }, [state?.appearance?.scheme]);
 
   const turn = state?.turn;
   const myTurn = turn?.guest_id === myId;
