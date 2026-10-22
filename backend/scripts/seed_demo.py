@@ -40,13 +40,13 @@ def main() -> None:
         guest, token = engine.join(ev["id"], name)
         tokens[name] = token
     engine.start_event(ev["id"])
-    # Walk the rotation, queueing a song per turn without waiting for the timers.
-    for vid, title, channel, dur in DEMO_SONGS[:4]:
-        current = engine.get_event(ev["id"])
-        engine._enter_choosing(current, engine._turn(current["current_turn_id"]), engine.clock())
-        turn = engine._turn(engine.get_event(ev["id"])["current_turn_id"])
-        engine.queue_song(turn["guest_id"], {"video_id": vid, "title": title, "channel": channel,
-                                             "duration_s": dur, "thumbnail": f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg"})
+    # Singers add songs whenever they like; the queue interleaves them fairly in singer order.
+    guests = engine.db.all("SELECT * FROM guests WHERE event_id = ? ORDER BY rotation_pos", (ev["id"],))
+    for guest, (vid, title, channel, dur) in zip(guests, DEMO_SONGS[:4]):
+        engine.queue_song(guest["id"], {"video_id": vid, "title": title, "channel": channel,
+                                        "duration_s": dur, "thumbnail": f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg"})
+    if not engine.get_event(ev["id"])["now_playing_item_id"]:
+        engine.play_next(ev["id"])
     first = engine.get_event(ev["id"])["now_playing_item_id"]
     engine.player_ended(ev["id"], first)  # one song in history
     engine.drain()

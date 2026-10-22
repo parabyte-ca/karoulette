@@ -38,7 +38,7 @@ function ThemesTab({ push }) {
   return (
     <section className="card">
       <h2>Themes</h2>
-      <p className="muted">Themes are guidance for each turn. Weight makes a theme more (or less) likely to come up.
+      <p className="muted">Each round spins one theme as guidance for everyone's picks. Weight makes a theme more (or less) likely to come up.
         Disabled themes are never spun.</p>
       <table className="table">
         <thead><tr><th>Name</th><th>Description</th><th>Weight</th><th>Enabled</th><th /></tr></thead>
@@ -111,7 +111,6 @@ function EventSettings({ eventId, push, onChanged }) {
           name,
           config: {
             ...cfg,
-            turn_seconds: Number(cfg.turn_seconds),
             superset_chance: Number(cfg.superset_chance) / 100,
             recent_theme_window: Number(cfg.recent_theme_window),
             max_duration_s: Number(cfg.max_duration_s),
@@ -127,8 +126,7 @@ function EventSettings({ eventId, push, onChanged }) {
   };
 
   const guestAction = async (g, action) => {
-    const verb = action === "remove" ? "Remove" : "Skip";
-    if (!window.confirm(`${verb} ${g.name}?`)) return;
+    if (action === "remove" && !window.confirm(`Remove ${g.name}? Their queued songs are removed too.`)) return;
     try {
       await api(`/api/host/events/${eventId}/guests/${g.id}/${action}`, { method: "POST" });
       load();
@@ -162,7 +160,6 @@ function EventSettings({ eventId, push, onChanged }) {
         <div className="grid">
           <label className="field"><span>Event name</span>
             <input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} /></label>
-          {field("turn_seconds", "Turn timer (seconds, a guide: nobody is skipped when it runs out)", { type: "number", min: 15, max: 600 })}
           {field("superset_chance", "Superset chance per round (%)", { type: "number", min: 0, max: 100 })}
           {field("recent_theme_window", "Avoid themes used in the last N turns", { type: "number", min: 0, max: 20 })}
           {field("max_duration_s", "Longest video allowed (seconds, 0 = no limit)", { type: "number", min: 0, max: 3600 })}
@@ -186,18 +183,24 @@ function EventSettings({ eventId, push, onChanged }) {
       </form>
 
       <section className="card">
-        <h2>Singers ({state.guests.length})</h2>
+        <h2>Singer order ({state.guests.length})</h2>
+        <p className="muted small">Songs play one per singer per round, in this order. New singers who join mid-event
+          are slotted in right after whoever is singing.</p>
         {!state.guests.length && <p className="muted">Nobody has joined yet.</p>}
         <ol className="list">
-          {state.guests.map((g) => (
+          {state.guests.map((g, idx) => (
             <li key={g.id} className="list-row">
               <span>
                 <strong>{g.name}</strong>
-                {state.turn?.guest_id === g.id && <span className="pill">Up now</span>}
-                {g.skip_next && <span className="pill">Skipping next</span>}
+                {state.now_playing?.guest_id === g.id && <span className="pill">Singing</span>}
+                {g.new_singer && <span className="pill">New singer</span>}
+                <span className="muted small"> · {g.queued} queued</span>
               </span>
               <span className="actions">
-                <button className="btn" onClick={() => guestAction(g, "skip")}>Skip</button>
+                <button className="btn" title="Earlier in the order" disabled={idx === 0}
+                        onClick={() => guestAction(g, "up")}>▲</button>
+                <button className="btn" title="Later in the order" disabled={idx === state.guests.length - 1}
+                        onClick={() => guestAction(g, "down")}>▼</button>
                 <button className="btn btn-danger" onClick={() => guestAction(g, "remove")}>Remove</button>
               </span>
             </li>
@@ -206,11 +209,12 @@ function EventSettings({ eventId, push, onChanged }) {
       </section>
 
       <section className="card">
-        <h2>Theme history</h2>
+        <h2>Round themes</h2>
+        {!state.rounds.length && <p className="muted">No rounds yet. Round 1 spins when the event starts.</p>}
         <ul className="list compact">
-          {state.theme_history.map((t, i) => (
-            <li key={i}>{t.guest_name}: <strong>{t.theme || "—"}</strong>
-              <span className="muted small"> {t.is_bonus ? "(bonus) " : ""}{t.outcome || "in progress"}</span></li>
+          {state.rounds.map((r) => (
+            <li key={r.number}>Round {r.number}: <strong>{r.theme || "—"}</strong>
+              {r.is_superset && <span className="pill">Superset</span>}</li>
           ))}
         </ul>
       </section>

@@ -330,3 +330,12 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 .mock-phone-card b { font-family: var(--font-display); font-size: 1.15em; text-transform: var(--display-case); }
 .mock-input { width: 90%; height: 1.3em; border-radius: 0.35em; background: var(--input); border: 1px solid var(--line); }
 .mock-btn { width: 90%; padding: 0.15em; border-radius: 0.35em; background: var(--accent); color: var(--on-accent); font-weight: 800; }
+
+/* ---------- free submission: new singers and rounds */
+.new-tag { margin-left: 0.4em; background: var(--accent-2); color: var(--bg); font-weight: 800; font-size: 0.75em; padding: 0.05em 0.5em; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.05em; }
+.newsinger-flash { background: linear-gradient(90deg, transparent, var(--accent-2) 15%, var(--accent) 85%, transparent); }
+.round-panel .turn-sub.small { font-size: 0.85em; margin-top: 0.4em; }
+.round-theme { margin-top: 0.8em; padding-top: 0.7em; border-top: 1px solid var(--line); }
+.song-actions { display: flex; flex-direction: column; gap: 0.35em; }
+.song-actions .btn { min-height: 40px; padding: 0.3em 0.8em; }
+.mine-song .pass-btn { margin-top: 0.5em; font-size: 0.9em; min-height: 40px; }

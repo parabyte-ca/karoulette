@@ -15,6 +15,7 @@ class FakeClock:
         self.now = start
 
     def __call__(self) -> float:
+        self.now += 0.001  # strictly increasing, so "most recent" queries are deterministic
         return self.now
 
     def advance(self, seconds: float) -> float:
@@ -35,28 +36,46 @@ def engine(clock):
     return eng
 
 
-def video(n: int) -> dict:
-    vid = f"vid{n:08d}"[:11].ljust(11, "x")
+_ids = iter(range(1, 100_000))
+
+
+def video(n: int | None = None) -> dict:
+    n = next(_ids) if n is None else n
+    vid = f"v{n:010d}"[:11]
     return {"video_id": vid, "title": f"Song {n}", "channel": "Karaoke Co", "duration_s": 200, "thumbnail": ""}
 
 
-def to_choosing(engine, clock):
-    """Run the ticker until the current turn reaches the choosing phase."""
-    for _ in range(10):
-        ev = engine.get_event(engine.db.one("SELECT id FROM events")["id"])
-        if ev["turn_state"] == "choosing":
-            return ev
-        if ev["phase_deadline"] is None:
-            return ev
-        clock.now = ev["phase_deadline"]
-        engine.tick()
-    return ev
+def add(engine, guest, n: int | None = None) -> dict:
+    return engine.queue_song(guest["id"], video(n))
+
+
+def singer_order(engine, event_id) -> list[str]:
+    """Singer names in play order: now playing first, then the queue."""
+    snap = engine.snapshot(event_id)
+    names = [snap["now_playing"]["guest_name"]] if snap["now_playing"] else []
+    return names + [q["guest_name"] for q in snap["queue"]]
+
+
+def play_all(engine, event_id) -> list[str]:
+    """Play the whole queue through; returns who sang, in order."""
+    sung = []
+    while True:
+        ev = engine.get_event(event_id)
+        if not ev["now_playing_item_id"]:
+            if not engine.play_next(event_id):
+                return sung
+            ev = engine.get_event(event_id)
+        item = engine.db.one("SELECT * FROM queue_items WHERE id = ?", (ev["now_playing_item_id"],))
+        sung.append(engine._guest(item["guest_id"])["display_name"])
+        engine.player_ended(event_id, item["id"])
+        if not engine.get_event(event_id)["now_playing_item_id"]:
+            return sung
 
 
 @pytest.fixture
 def make_event(engine):
     def _make(names=("Alex", "Blake", "Casey"), start=True, **config):
-        cfg = {"superset_chance": 0.0, **config}
+        cfg = {"superset_chance": 0.0, "autoplay": False, **config}
         ev = engine.create_event("Test Night", cfg)
         guests = [engine.join(ev["id"], n)[0] for n in names]
         if start:

@@ -53,8 +53,7 @@ def test_host_endpoints_require_login(client):
 
 def test_full_guest_flow(client):
     login(client)
-    created = client.post("/api/host/events", json={"name": "Friday", "config": {"announce_seconds": 0,
-                                                                                 "superset_chance": 0}}).json()
+    created = client.post("/api/host/events", json={"name": "Friday", "config": {"superset_chance": 0}}).json()
     code = created["join_code"]
     assert client.get(f"/api/public/events/{code}").json()["name"] == "Friday"
     assert client.get(f"/api/public/qr.svg?code={code}").headers["content-type"].startswith("image/svg")
@@ -62,12 +61,8 @@ def test_full_guest_flow(client):
     guest = client.post("/api/guest/join", json={"code": code, "name": "Alex"}).json()
     headers = {"Authorization": f"Bearer {guest['token']}"}
     assert client.post(f"/api/host/events/{created['id']}/actions/start").status_code == 200
-
-    engine = client.app.state.engine
-    clock_now = engine.get_event(created["id"])["phase_deadline"]
-    engine.tick(clock_now + 0.1)  # spin -> choosing
     state = client.get("/api/guest/state", headers=headers).json()
-    assert state["turn"]["guest_id"] == guest["guest"]["id"]
+    assert state["round"]["number"] == 1 and state["round"]["theme"]["name"]
 
     res = client.get("/api/guest/search?q=bohemian", headers=headers)
     assert res.status_code == 200 and "SECRET" not in res.text
@@ -117,20 +112,27 @@ def test_themes_crud(client):
     assert client.delete(f"/api/host/themes/{t['id']}").status_code == 200
 
 
-def test_guest_pass_endpoint(client):
+def test_song_actions_endpoints(client):
     login(client)
-    created = client.post("/api/host/events", json={"name": "Pass", "config": {"announce_seconds": 0,
-                                                                               "superset_chance": 0}}).json()
+    created = client.post("/api/host/events", json={"name": "Free", "config": {"superset_chance": 0,
+                                                                              "prevent_duplicates": False,
+                                                                              "autoplay": False}}).json()
     a = client.post("/api/guest/join", json={"code": created["join_code"], "name": "A"}).json()
     b = client.post("/api/guest/join", json={"code": created["join_code"], "name": "B"}).json()
-    client.post(f"/api/host/events/{created['id']}/actions/start")
     ha = {"Authorization": f"Bearer {a['token']}"}
     hb = {"Authorization": f"Bearer {b['token']}"}
-    assert client.post("/api/guest/pass", headers=hb).status_code == 409
-    assert client.post("/api/guest/pass", headers=ha).status_code == 200
-    state = client.get("/api/guest/state", headers=ha).json()
-    assert state["turn"]["guest_id"] == b["guest"]["id"]
-    assert state["upcoming"][0] == a["guest"]["id"]
+    # No waiting for a turn: both can add several songs straight away, even before the start.
+    ids = [client.post("/api/guest/queue", json={"video_id": "abcdefghijk"}, headers=h).json()["item_id"]
+           for h in (ha, ha, hb)]
+    queue = client.get("/api/guest/state", headers=ha).json()["queue"]
+    assert [q["guest_id"] for q in queue] == [a["guest"]["id"], b["guest"]["id"], a["guest"]["id"]]
+    assert client.post(f"/api/guest/queue/{ids[0]}/let-next-go-first", headers=hb).status_code == 409
+    assert client.post(f"/api/guest/queue/{ids[0]}/let-next-go-first", headers=ha).status_code == 200
+    queue = client.get("/api/guest/state", headers=ha).json()["queue"]
+    assert queue[0]["guest_id"] == b["guest"]["id"]
+    assert client.post(f"/api/host/events/{created['id']}/queue/{ids[1]}/play-next").status_code == 200
+    assert client.get("/api/guest/state", headers=ha).json()["queue"][0]["id"] == ids[1]
+    assert client.post(f"/api/host/events/{created['id']}/guests/{b['guest']['id']}/up").status_code == 200
 
 
 def test_updates_endpoints_need_host(client):

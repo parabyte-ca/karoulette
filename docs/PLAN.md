@@ -17,7 +17,7 @@
 ```
 
 - One Docker image (multi-stage: Node builds SPA → Python slim runtime with yt-dlp).
-- In-process asyncio turn timer per active event; timer deadline persisted, so a restart resumes with the remaining time.
+- No timers in the event flow (v0.6.0): the play order is derived from stored data (singer order, song rounds, priorities), so a restart resumes exactly.
 - All state changes go through the engine → persisted → `broadcast(event_id, message)` to all WS clients of that event. Clients re-fetch a full `state` snapshot on (re)connect, then apply deltas.
 
 ## 2. Data model (SQLite)
@@ -40,9 +40,9 @@
 
 ## 3. Core logic
 
-**Rotation:** active guests ordered by `rotation_pos`. Next guest = first active guest with `rotation_pos` > current; wrap → new round. Late joiners get `max(pos)+1` (end of order). Leaving/removed guests are skipped; if the current guest leaves, the turn advances immediately.
+**Singer order and fair queue (v0.6.0):** singers add songs any time. Active guests are ordered by `rotation_pos` (join order). Each song gets a `round_no` when added (`logic.assign_round`): the current round if the singer's slot in it is still ahead of the singer on the mic and they have no song there yet, otherwise the round after their last song. The queue is sorted by (`priority` if set, `round_no`, singer position + `order_bias`). A new round starts (theme spin, Superset roll) when the first song of a higher round plays. Guests who join after singing has started are inserted next in line (right after the singer on the mic, behind other waiting newcomers) with `debut_pending`, re-slotted when they add their first song, and announced (`new_singer`) when it plays. "Let the next singer go first" moves one song exactly one place back (`order_bias`, or into the next song's round). An embed error sets `repick_credit`, giving that singer's next song a `priority`. Host "play next" sets a `priority` ahead of all others.
 
-**Turn lifecycle:** `announcing` (3 s, host shows "Up: Alex") → `spinning` (theme spin, ~4 s animation; result pushed to phone) → `choosing` (deadline = now + turn_seconds) → `overtime` when the 3-minute guide timer runs out (no skip; notice only) → song queued, guest **passes**, or host skips → next guest. A pass adds a `deferred` entry to `bonus_queue` (`after_guest_id` = whoever picks next); once that singer's turn starts the entry is ready and the passer picks next, without moving the rotation cursor. Rotation paused = timer frozen (remaining time stored), no advance.
+**(Superseded in v0.6.0) Turn lifecycle:** `announcing` (3 s, host shows "Up: Alex") → `spinning` (theme spin, ~4 s animation; result pushed to phone) → `choosing` (deadline = now + turn_seconds) → `overtime` when the 3-minute guide timer runs out (no skip; notice only) → song queued, guest **passes**, or host skips → next guest. A pass adds a `deferred` entry to `bonus_queue` (`after_guest_id` = whoever picks next); once that singer's turn starts the entry is ready and the passer picks next, without moving the rotation cursor. Rotation paused = timer frozen (remaining time stored), no advance.
 
 **Theme pick:** weighted random over enabled themes, excluding the previous theme (hard) and the last *N* themes (soft — relaxed if it would leave nothing).
 

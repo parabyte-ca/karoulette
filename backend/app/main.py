@@ -70,14 +70,6 @@ class ThemeIn(BaseModel):
     enabled: bool = True
 
 
-class MoveIn(BaseModel):
-    index: int = Field(ge=0, le=10000)
-
-
-class ReorderIn(BaseModel):
-    ids: list[int] = Field(max_length=1000)
-
-
 class UpgradeIn(BaseModel):
     version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
 
@@ -89,8 +81,7 @@ class PlayerIn(BaseModel):
 
 
 EVENT_ACTIONS: dict[str, str] = {
-    "start": "start_event", "end": "end_event", "pause": "pause_rotation", "resume": "resume_rotation",
-    "skip-turn": "skip_turn", "spin": "force_spin", "superset-force": "force_superset",
+    "start": "start_event", "end": "end_event", "spin": "force_spin", "superset-force": "force_superset",
     "superset-cancel": "cancel_superset", "play-next": "play_next", "skip-song": "skip_song",
     "stop-playback": "stop_playback",
 }
@@ -142,13 +133,8 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     async def ticker():
         purge_at = 0.0
         while True:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(30)
             try:
-                async with lock:
-                    engine.tick()
-                    messages = engine.drain()
-                if messages:
-                    await broadcast(messages)
                 loop_time = asyncio.get_running_loop().time()
                 if loop_time > purge_at:
                     yt.purge_cache()
@@ -304,9 +290,14 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         item = await run(engine.queue_song, guest["id"], video, event_id=guest["event_id"])
         return {"ok": True, "item_id": item["id"]}
 
-    @app.post("/api/guest/pass")
-    async def guest_pass(guest: dict = Depends(current_guest)):
-        await run(engine.pass_turn, guest["id"], event_id=guest["event_id"])
+    @app.post("/api/guest/queue/{item_id}/let-next-go-first")
+    async def guest_let_next_go_first(item_id: int, guest: dict = Depends(current_guest)):
+        await run(engine.let_next_go_first, guest["id"], item_id, event_id=guest["event_id"])
+        return {"ok": True}
+
+    @app.post("/api/guest/queue/{item_id}/up")
+    async def guest_song_up(item_id: int, guest: dict = Depends(current_guest)):
+        await run(engine.move_my_song_up, guest["id"], item_id, event_id=guest["event_id"])
         return {"ok": True}
 
     @app.delete("/api/guest/queue/{item_id}")
@@ -391,14 +382,9 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         await run(getattr(engine, method), event_id, event_id=event_id)
         return {"ok": True}
 
-    @app.post("/api/host/events/{event_id}/queue/reorder", dependencies=host)
-    async def reorder(event_id: int, body: ReorderIn):
-        await run(engine.reorder, event_id, body.ids, event_id=event_id)
-        return {"ok": True}
-
-    @app.post("/api/host/events/{event_id}/queue/{item_id}/move", dependencies=host)
-    async def move(event_id: int, item_id: int, body: MoveIn):
-        await run(engine.move_item, event_id, item_id, body.index, event_id=event_id)
+    @app.post("/api/host/events/{event_id}/queue/{item_id}/play-next", dependencies=host)
+    async def play_item_next(event_id: int, item_id: int):
+        await run(engine.play_item_next, event_id, item_id, event_id=event_id)
         return {"ok": True}
 
     @app.delete("/api/host/events/{event_id}/queue/{item_id}", dependencies=host)
@@ -416,7 +402,9 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         g = db.one("SELECT event_id FROM guests WHERE id = ?", (guest_id,))
         if not g or g["event_id"] != event_id:
             raise HTTPException(404, "Guest not found")
-        fn = {"remove": engine.remove_guest, "skip": engine.skip_guest}.get(action)
+        fn = {"remove": engine.remove_guest,
+              "up": lambda gid: engine.move_guest(gid, -1),
+              "down": lambda gid: engine.move_guest(gid, 1)}.get(action)
         if not fn:
             raise HTTPException(404, "Unknown action")
         await run(fn, guest_id, event_id=event_id)
