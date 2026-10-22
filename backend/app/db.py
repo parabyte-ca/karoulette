@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -131,7 +131,8 @@ CREATE TABLE IF NOT EXISTS quota_ledger (
 """
 
 
-# Columns added after the first release (v0.6.0: free song submission with a fair round-robin queue).
+# Columns added after the first release (v0.6.0: free song submission with a fair round-robin queue;
+# v0.7.0: get-ready countdown, duets and rejoin codes).
 ADDED_COLUMNS = [
     ("queue_items", "round_no", "INTEGER"),            # rotation round this song belongs to
     ("queue_items", "priority", "REAL"),               # non-NULL = plays before the round-robin, ascending
@@ -141,6 +142,10 @@ ADDED_COLUMNS = [
     ("rounds", "spun_at", "REAL"),
     ("guests", "debut_pending", "INTEGER NOT NULL DEFAULT 0"),  # joined mid-event, first song not sung yet
     ("guests", "repick_credit", "INTEGER NOT NULL DEFAULT 0"),  # their last song couldn't play
+    # v0.7.0
+    ("events", "ready_until", "REAL"),                 # the TV's "Get ready" countdown ends at this time
+    ("queue_items", "duet_guest_id", "INTEGER"),       # second singer on a duet
+    ("guests", "rejoin_code", "TEXT"),                 # lets a singer get back in on another phone
 ]
 
 

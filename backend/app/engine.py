@@ -33,8 +33,11 @@ SEED_THEMES = [
     ("One-Hit Wonders", "Artists famous for exactly one song.", 1.0),
 ]
 ACTIVE_QUEUE_STATUSES = ("queued", "playing")
-COLOUR_SCHEMES = ("neon", "onair", "synthwave", "velvet", "aurora")
+COLOUR_SCHEMES = ("neon", "onair", "synthwave", "velvet", "aurora", "disco")
 DEFAULT_SCHEME = "neon"
+REACTIONS = ("👏", "🔥", "😂", "❤️", "🎉", "🤘")
+VIDEO_COMMANDS = ("toggle", "volume_up", "volume_down")
+UNKNOWN_DURATION_S = 240  # what the recap and wait estimates assume when YouTube gave no length
 
 
 class EngineError(Exception):
@@ -237,7 +240,7 @@ class Engine:
                         (event_id,))
         self.db.execute("UPDATE queue_items SET status = 'played', played_at = ? "
                         "WHERE event_id = ? AND status = 'playing'", (self.clock(), event_id))
-        self._set(event_id, status="ended", ended_at=self.clock(), now_playing_item_id=None)
+        self._set(event_id, status="ended", ended_at=self.clock(), now_playing_item_id=None, ready_until=None)
         self.emit(event_id, "event_ended")
         self.notice(event_id, "Thanks for singing! This event has ended.")
 
@@ -289,16 +292,52 @@ class Engine:
         token = secrets.token_urlsafe(32)
         singing_started = self._anchor(ev) is not None
         guest_id = self.db.insert(
-            "INSERT INTO guests(event_id, display_name, token_hash, rotation_pos, joined_at, debut_pending) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO guests(event_id, display_name, token_hash, rotation_pos, joined_at, debut_pending, "
+            "rejoin_code) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (event_id, name, hash_token(token), logic.next_rotation_pos(self._guests(event_id, active_only=False)),
-             self.clock(), int(singing_started)))
+             self.clock(), int(singing_started), self._new_rejoin_code(event_id)))
         if singing_started:
             self._place_next_in_line(ev, guest_id)
             self.notice(event_id, f"🎉 New singer! {name} joins the line-up, right after the current singer.",
                         "success")
         self.emit(event_id, "guest_joined", {"guest_id": guest_id, "name": name, "new_singer": singing_started})
         return self._guest(guest_id), token
+
+    def _new_rejoin_code(self, event_id: int) -> str:
+        while True:
+            code = "".join(secrets.choice(JOIN_CODE_ALPHABET) for _ in range(6))
+            if not self.db.one("SELECT 1 FROM guests WHERE event_id = ? AND rejoin_code = ?", (event_id, code)):
+                return code
+
+    def rejoin_code(self, guest_id: int) -> str:
+        """A singer's personal code for getting back in on another phone (made on demand for older guests)."""
+        g = self._guest(guest_id)
+        if not g["rejoin_code"]:
+            g["rejoin_code"] = self._new_rejoin_code(g["event_id"])
+            self.db.execute("UPDATE guests SET rejoin_code = ? WHERE id = ?", (g["rejoin_code"], guest_id))
+        return g["rejoin_code"]
+
+    def rejoin(self, event_id: int, rejoin_code: str) -> tuple[dict, str]:
+        """Swap a singer onto a new phone: issues a fresh token and signs the old phone out."""
+        ev = self.get_event(event_id)
+        if ev["status"] == "ended":
+            raise EngineError("This event has ended", 410)
+        code = (rejoin_code or "").strip().upper()
+        g = self.db.one("SELECT * FROM guests WHERE event_id = ? AND rejoin_code = ?", (event_id, code)) \
+            if len(code) == 6 else None
+        if not g or g["status"] == "removed":
+            raise EngineError("That rejoin code didn't match. Ask the host to check it in Host admin.", 404)
+        if g["status"] == "left":
+            if self.db.one("SELECT 1 FROM guests WHERE event_id = ? AND status = 'active' AND id != ? "
+                           "AND display_name = ? COLLATE NOCASE", (event_id, g["id"], g["display_name"])):
+                raise EngineError("Someone else is using your name now. Join again with a new name.", 409)
+            self.db.execute("UPDATE guests SET status = 'active' WHERE id = ?", (g["id"],))
+            self.notice(event_id, f"{g['display_name']} is back!", "success")
+            self.emit(event_id, "guest_joined", {"guest_id": g["id"], "name": g["display_name"], "new_singer": False})
+        token = secrets.token_urlsafe(32)
+        self.db.execute("UPDATE guests SET token_hash = ? WHERE id = ?", (hash_token(token), g["id"]))
+        self.emit(event_id, "session_replaced", {}, guest_id=g["id"])
+        return self._guest(g["id"]), token
 
     def guest_by_token(self, token: str) -> dict:
         g = self.db.one("SELECT * FROM guests WHERE token_hash = ?", (hash_token(token or ""),))
@@ -312,6 +351,8 @@ class Engine:
             return
         self.db.execute("UPDATE guests SET status = ? WHERE id = ?", (status, guest_id))
         self.db.execute("UPDATE queue_items SET status = 'removed' WHERE guest_id = ? AND status = 'queued'",
+                        (guest_id,))
+        self.db.execute("UPDATE queue_items SET duet_guest_id = NULL WHERE duet_guest_id = ? AND status = 'queued'",
                         (guest_id,))
         self.emit(g["event_id"], "guest_left", {"guest_id": guest_id, "name": g["display_name"], "reason": status})
         self.notice(g["event_id"], text)
@@ -405,7 +446,7 @@ class Engine:
         ev = self.get_event(event_id)
         return logic.play_order(self._items(event_id, ("queued",)), self._positions(event_id), ev["current_round"])
 
-    def queue_song(self, guest_id: int, video: dict) -> dict:
+    def queue_song(self, guest_id: int, video: dict, duet_guest_id: int | None = None) -> dict:
         """Singers add as many songs as they like; each lands in the next round they don't have a song in."""
         guest = self._guest(guest_id)
         if guest["status"] != "active":
@@ -421,6 +462,17 @@ class Engine:
 
         mine = self.db.all("SELECT * FROM queue_items WHERE guest_id = ? AND status IN "
                            "('queued', 'playing', 'played', 'skipped')", (guest_id,))
+        cap = int(ev["config"]["max_songs_per_singer"])
+        waiting = sum(1 for m in mine if m["status"] == "queued")
+        if cap and waiting >= cap:
+            raise EngineError(f"You already have {waiting} song{'s' if waiting != 1 else ''} waiting (the limit is "
+                              f"{cap}). Add another once one has played.", 409)
+        if duet_guest_id is not None:
+            partner = self.db.one("SELECT * FROM guests WHERE id = ?", (duet_guest_id,))
+            if not partner or partner["event_id"] != ev["id"] or partner["status"] != "active":
+                raise EngineError("Your duet partner isn't at this event any more.", 404)
+            if duet_guest_id == guest_id:
+                raise EngineError("Pick someone else to sing the duet with.")
         first_song = not mine and guest["debut_pending"]
         if first_song and self._place_next_in_line(ev, guest_id):  # the line moved on since they joined
             guest = self._guest(guest_id)
@@ -432,12 +484,15 @@ class Engine:
             priority = max((q["priority"] for q in queued if q["priority"] is not None), default=0) + 1
             self.db.execute("UPDATE guests SET repick_credit = 0 WHERE id = ?", (guest_id,))
         item_id = self.db.insert(
-            "INSERT INTO queue_items(event_id, guest_id, round_no, priority, video_id, title, channel, duration_s, "
-            "thumbnail, position, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
-            (ev["id"], guest_id, round_no, priority, video["video_id"], video["title"][:200],
+            "INSERT INTO queue_items(event_id, guest_id, duet_guest_id, round_no, priority, video_id, title, channel, "
+            "duration_s, thumbnail, position, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+            (ev["id"], guest_id, duet_guest_id, round_no, priority, video["video_id"], video["title"][:200],
              (video.get("channel") or "")[:120], video.get("duration_s"), video.get("thumbnail") or "", self.clock()))
         self.emit(ev["id"], "song_queued", {"item_id": item_id, "guest_id": guest_id,
                                             "name": guest["display_name"], "title": video["title"]})
+        if duet_guest_id is not None:
+            self.emit(ev["id"], "duet_invite", {"item_id": item_id, "name": guest["display_name"],
+                                                "title": video["title"]}, guest_id=duet_guest_id)
         if first_song:
             self.notice(ev["id"], f"New singer {guest['display_name']} is next in line!", "success")
         if ev["status"] == "active" and ev["config"]["autoplay"] and not ev["now_playing_item_id"]:
@@ -514,6 +569,16 @@ class Engine:
         self.notice(event_id, f"{guest['display_name']} let {nxt_name} go first.")
         self.emit(event_id, "queue_reordered")
 
+    def leave_duet(self, guest_id: int, item_id: int) -> None:
+        """The second singer on a duet drops out; the song stays with the singer who picked it."""
+        guest = self._guest(guest_id)
+        item = self._my_item(guest["event_id"], item_id, None)
+        if item["duet_guest_id"] != guest_id or item["status"] != "queued":
+            raise EngineError("You're not on that duet.", 409)
+        self.db.execute("UPDATE queue_items SET duet_guest_id = NULL WHERE id = ?", (item_id,))
+        self.notice(guest["event_id"], f"{guest['display_name']} stepped out of a duet.", guest_id=item["guest_id"])
+        self.emit(guest["event_id"], "queue_reordered")
+
     def flag_item(self, event_id: int, item_id: int, flagged_by: str) -> int:
         item = self._my_item(event_id, item_id, None)
         if not self._in_superset(self.get_event(event_id), item):
@@ -542,7 +607,7 @@ class Engine:
                             (self.clock(), ev["now_playing_item_id"]))
         nxt = self._queue(event_id)
         if not nxt or ev["status"] != "active":
-            self._set(event_id, now_playing_item_id=None)
+            self._set(event_id, now_playing_item_id=None, ready_until=None)
             self.emit(event_id, "now_playing", {"item": None})
             return None
         item = nxt[0]
@@ -554,18 +619,35 @@ class Engine:
                         "is_superset = ?, round_no = COALESCE(round_no, ?) WHERE id = ?",
                         (self.clock(), rnd["id"] if rnd else None, rnd["theme_name"] if rnd else None,
                          int(bool(rnd and rnd["is_superset"])), ev["current_round"], item["id"]))
-        self._set(event_id, now_playing_item_id=item["id"])
+        ready = int(ev["config"]["ready_seconds"])
+        self._set(event_id, now_playing_item_id=item["id"], ready_until=self.clock() + ready if ready else None)
         guest = self._guest(item["guest_id"])
         self.emit(event_id, "now_playing", {"item_id": item["id"], "video_id": item["video_id"],
                                             "title": item["title"], "guest_id": guest["id"],
-                                            "name": guest["display_name"]})
+                                            "name": guest["display_name"], "ready_seconds": ready})
         if guest["debut_pending"]:
             self.db.execute("UPDATE guests SET debut_pending = 0 WHERE id = ?", (guest["id"],))
             self.emit(event_id, "new_singer", {"guest_id": guest["id"], "name": guest["display_name"]})
-        self.emit(event_id, "you_are_singing", {"title": item["title"]}, guest_id=guest["id"])
+        for gid in filter(None, (guest["id"], item["duet_guest_id"])):
+            self.emit(event_id, "you_are_singing", {"title": item["title"]}, guest_id=gid)
         if len(nxt) > 1:
-            self.emit(event_id, "you_are_next", {"title": nxt[1]["title"]}, guest_id=nxt[1]["guest_id"])
+            for gid in filter(None, (nxt[1]["guest_id"], nxt[1]["duet_guest_id"])):
+                self.emit(event_id, "you_are_next", {"title": nxt[1]["title"]}, guest_id=gid)
         return item
+
+    def start_now(self, event_id: int) -> None:
+        """Host: cut the "Get ready" countdown short."""
+        ev = self.get_event(event_id)
+        if ev["now_playing_item_id"] and ev["ready_until"]:
+            self._set(event_id, ready_until=None)
+            self.emit(event_id, "ready_skipped")
+
+    def video_command(self, event_id: int, command: str) -> None:
+        """Host remote: pause/play or change the volume of the TV's player."""
+        self.get_event(event_id)
+        if command not in VIDEO_COMMANDS:
+            raise EngineError("Unknown video command")
+        self.emit(event_id, "video_command", {"command": command})
 
     def player_ended(self, event_id: int, item_id: int) -> None:
         ev = self.get_event(event_id)
@@ -591,7 +673,7 @@ class Engine:
             front = min((q["priority"] for q in queued if q["priority"] is not None), default=1.0) - 1
             self.db.execute("UPDATE queue_items SET status = 'queued', priority = ?, played_at = NULL WHERE id = ?",
                             (front, ev["now_playing_item_id"]))
-            self._set(event_id, now_playing_item_id=None)
+            self._set(event_id, now_playing_item_id=None, ready_until=None)
             self.emit(event_id, "now_playing", {"item": None})
 
     def player_error(self, event_id: int, item_id: int, code: int) -> None:
@@ -632,7 +714,10 @@ class Engine:
                     "round": i["round_no"], "priority": i["priority"] is not None,
                     "is_superset": self._in_superset(ev, i) if i["status"] in ACTIVE_QUEUE_STATUSES
                     else bool(i["is_superset"]),
-                    "flags": flag_counts.get(i["id"], 0), "status": i["status"]}
+                    "flags": flag_counts.get(i["id"], 0), "status": i["status"],
+                    "duet_guest_id": i["duet_guest_id"],
+                    "duet_name": names.get(i["duet_guest_id"]) if i["duet_guest_id"] else None,
+                    "started_at": i["played_at"] if i["status"] == "playing" else None}
 
         queue = [item_out(i) for i in self._queue(event_id)]
         playing = self.db.one("SELECT * FROM queue_items WHERE id = ?", (ev["now_playing_item_id"],)) \
@@ -660,11 +745,64 @@ class Engine:
                         "new_singer": bool(g["debut_pending"]), "queued": counts.get(g["id"], 0)}
                        for g in active],
             "queue": queue,
-            "now_playing": item_out(playing) if playing else None,
+            "now_playing": {**item_out(playing), "starts_at": ev["ready_until"] or playing["played_at"]}
+            if playing else None,
             "recent": recent,
             "rounds": history,
             "appearance": self.appearance(),
+            "reactions": list(REACTIONS),
+            "recap": self.recap(event_id) if ev["status"] == "ended" else None,
         }
+
+    def recap(self, event_id: int) -> dict:
+        """End-of-night numbers for the TV and phones."""
+        ev = self.get_event(event_id)
+        sung = self.db.all(
+            "SELECT q.*, g.display_name, d.display_name AS duet_name FROM queue_items q "
+            "JOIN guests g ON g.id = q.guest_id LEFT JOIN guests d ON d.id = q.duet_guest_id "
+            "WHERE q.event_id = ? AND q.status = 'played' ORDER BY q.played_at, q.id", (event_id,))
+        flagged = {r["queue_item_id"] for r in self.db.all(
+            "SELECT DISTINCT f.queue_item_id FROM flags f JOIN queue_items q ON q.id = f.queue_item_id "
+            "WHERE q.event_id = ?", (event_id,))}
+        per_singer: dict[str, int] = {}
+        for s in sung:
+            for name in filter(None, (s["display_name"], s["duet_name"])):
+                per_singer[name] = per_singer.get(name, 0) + 1
+        best = max(per_singer.values(), default=0)
+        rounds = self.db.all("SELECT * FROM rounds WHERE event_id = ? ORDER BY number", (event_id,))
+        theme_counts: dict[str, int] = {}
+        for s in sung:
+            if s["theme_name"]:
+                theme_counts[s["theme_name"]] = theme_counts.get(s["theme_name"], 0) + 1
+        stars = sorted({s["display_name"] for s in sung if s["is_superset"] and s["id"] not in flagged})
+        song = (lambda s: {"title": s["title"], "singer": s["display_name"] + (f" & {s['duet_name']}"
+                                                                              if s["duet_name"] else "")})
+        longest = max(sung, key=lambda s: s["duration_s"] or 0, default=None)
+        return {
+            "songs": len(sung),
+            "singers": len(per_singer),
+            "minutes": round(sum(s["duration_s"] or UNKNOWN_DURATION_S for s in sung) / 60),
+            "duets": sum(1 for s in sung if s["duet_name"]),
+            "rounds": len(rounds),
+            "superset_rounds": sum(1 for r in rounds if r["is_superset"]),
+            "top_singers": sorted(n for n, c in per_singer.items() if c == best) if best else [],
+            "top_count": best,
+            "per_singer": per_singer,
+            "top_themes": [t for t, _ in sorted(theme_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]],
+            "superset_stars": stars,
+            "late_joiners": self.db.one(
+                "SELECT COUNT(*) AS n FROM guests WHERE event_id = ? AND joined_at > ?",
+                (event_id, ev["started_at"] or float("inf")))["n"],
+            "first_song": song(sung[0]) if sung else None,
+            "last_song": song(sung[-1]) if sung else None,
+            "longest_song": song(longest) if longest and longest["duration_s"] else None,
+        }
+
+    def guest_codes(self, event_id: int) -> list[dict]:
+        """Host only: every singer's rejoin code (never part of the shared snapshot)."""
+        return [{"id": g["id"], "name": g["display_name"], "status": g["status"],
+                 "rejoin_code": self.rejoin_code(g["id"])} for g in self._guests(event_id, active_only=False)
+                if g["status"] != "removed"]
 
     def appearance(self) -> dict:
         scheme = self.db.get_setting("colour_scheme", DEFAULT_SCHEME)
@@ -679,8 +817,9 @@ class Engine:
     def history_csv(self, event_id: int) -> str:
         ev = self.get_event(event_id)
         rows = self.db.all(
-            "SELECT q.*, g.display_name, COALESCE(r.number, q.round_no) AS round_number FROM queue_items q "
-            "JOIN guests g ON g.id = q.guest_id LEFT JOIN rounds r ON r.id = q.round_id "
+            "SELECT q.*, g.display_name, d.display_name AS duet_name, COALESCE(r.number, q.round_no) AS round_number "
+            "FROM queue_items q JOIN guests g ON g.id = q.guest_id LEFT JOIN guests d ON d.id = q.duet_guest_id "
+            "LEFT JOIN rounds r ON r.id = q.round_id "
             "WHERE q.event_id = ? AND q.status IN ('played', 'playing', 'skipped', 'error') "
             "ORDER BY COALESCE(q.played_at, q.added_at)", (event_id,))
         buf = io.StringIO()
@@ -690,6 +829,7 @@ class Engine:
         for r in rows:
             ts = datetime.fromtimestamp(r["played_at"] or r["added_at"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             w.writerow([ev["name"], ts, r["round_number"] or "", "yes" if r["is_superset"] else "no",
-                        r["theme_name"] or "", r["display_name"], r["title"], r["channel"], r["duration_s"] or "",
+                        r["theme_name"] or "", r["display_name"] + (f" & {r['duet_name']}" if r["duet_name"] else ""),
+                        r["title"], r["channel"], r["duration_s"] or "",
                         r["status"], f"https://www.youtube.com/watch?v={r['video_id']}"])
         return buf.getvalue()

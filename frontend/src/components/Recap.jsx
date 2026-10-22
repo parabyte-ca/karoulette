@@ -1,0 +1,46 @@
+import { decodeEntities } from "../lib/format";
+
+/** End-of-night summary: big stat tiles plus the night's highlights. `me` adds a personal line on phones. */
+export default function Recap({ recap, eventName, me = null, size = "tv" }) {
+  if (!recap) return null;
+  const tiles = [
+    [recap.songs, recap.songs === 1 ? "song sung" : "songs sung"],
+    [recap.singers, recap.singers === 1 ? "singer" : "singers"],
+    [recap.minutes, "minutes of music"],
+    [recap.rounds, recap.rounds === 1 ? "round" : "rounds"],
+  ];
+  if (recap.duets) tiles.push([recap.duets, recap.duets === 1 ? "duet" : "duets"]);
+  if (recap.superset_rounds) tiles.push([recap.superset_rounds, recap.superset_rounds === 1 ? "Superset round" : "Superset rounds"]);
+  const mine = me ? recap.per_singer?.[me] || 0 : null;
+  const highlights = [
+    recap.top_singers.length > 0 && ["🏆 Most songs", `${recap.top_singers.join(", ")} (${recap.top_count})`],
+    recap.top_themes.length > 0 && ["🎰 Top themes", recap.top_themes.join(", ")],
+    recap.superset_stars.length > 0 && ["★ Superset stars", recap.superset_stars.join(", ")],
+    recap.first_song && ["🎬 Opened the night", `${recap.first_song.singer} · ${decodeEntities(recap.first_song.title)}`],
+    recap.last_song && recap.songs > 1 && ["🌙 Closed it out", `${recap.last_song.singer} · ${decodeEntities(recap.last_song.title)}`],
+    recap.longest_song && ["⏱ Longest song", `${recap.longest_song.singer} · ${decodeEntities(recap.longest_song.title)}`],
+    recap.late_joiners > 0 && ["🎉 Joined mid-party", `${recap.late_joiners} new singer${recap.late_joiners === 1 ? "" : "s"}`],
+  ].filter(Boolean);
+
+  return (
+    <div className={`recap recap-${size}`}>
+      <div className="label">That's a wrap</div>
+      <h2 className="recap-title">{eventName}</h2>
+      {mine !== null && (
+        <p className="recap-me">{mine ? `You sang ${mine} song${mine === 1 ? "" : "s"} tonight. Bravo! 🎤` : "Thanks for cheering everyone on! 👏"}</p>
+      )}
+      <div className="recap-tiles">
+        {tiles.map(([n, label]) => (
+          <div key={label} className="recap-tile"><b>{n}</b><span>{label}</span></div>
+        ))}
+      </div>
+      {highlights.length > 0 && (
+        <dl className="recap-highlights">
+          {highlights.map(([k, v]) => (
+            <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}

@@ -24,3 +24,6 @@ secret.key
 
 # Upgrade helper folder
 upgrade/
+frontend/e2e/.data/
+frontend/test-results/
+frontend/playwright-report/

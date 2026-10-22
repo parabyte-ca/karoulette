@@ -17,6 +17,8 @@ DEFAULT_EVENT_CONFIG: dict = {
     "max_duration_s": 900,       # 0 disables the limit
     "autoplay": True,
     "spin_seconds": 5,
+    "ready_seconds": 5,          # "Get ready" countdown on the TV before each song; 0 turns it off
+    "max_songs_per_singer": 0,   # songs a singer may have waiting at once; 0 = no limit
 }
 
 CONFIG_LIMITS: dict = {
@@ -24,6 +26,8 @@ CONFIG_LIMITS: dict = {
     "recent_theme_window": (0, 20),
     "max_duration_s": (0, 3600),
     "spin_seconds": (1, 15),
+    "ready_seconds": (0, 60),
+    "max_songs_per_singer": (0, 50),
 }
 
 

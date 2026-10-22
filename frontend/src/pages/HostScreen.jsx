@@ -6,7 +6,9 @@ import { useCountdown, useEventSocket } from "../lib/useEventSocket";
 import { decodeEntities, formatDuration } from "../lib/format";
 import YouTubePlayer from "../components/YouTubePlayer";
 import ThemeSpinner from "../components/ThemeSpinner";
+import Recap from "../components/Recap";
 import { Toasts, useToasts } from "../components/Toasts";
+import { singers } from "../lib/eta";
 
 const CHECK_KEY = "kq_premium_checked";
 
@@ -65,6 +67,8 @@ export default function HostScreen() {
   const [newSinger, setNewSinger] = useState(null);
   const [spinMeta, setSpinMeta] = useState({ duration: 5 });
   const [playerState, setPlayerState] = useState(-1);
+  const [reactions, setReactions] = useState([]);
+  const [showRemote, setShowRemote] = useState(false);
   const { toasts, push } = useToasts();
   const playerRef = useRef(null);
   const hideTimer = useRef(null);
@@ -106,6 +110,21 @@ export default function HostScreen() {
       case "song_flagged":
         push(`⚑ “${decodeEntities(d.title)}” was flagged as off-theme (${d.count})`, "warning");
         break;
+      case "reaction": {
+        // Float the emoji up the screen from a random spot near the bottom; keep at most 40 on screen.
+        const id = Math.random().toString(36).slice(2);
+        const r = { id, emoji: d.emoji, name: d.name, left: 8 + Math.random() * 84, drift: Math.random() * 60 - 30 };
+        setReactions((list) => [...list.slice(-39), r]);
+        setTimeout(() => setReactions((list) => list.filter((x) => x.id !== id)), 3600);
+        break;
+      }
+      case "video_command":
+        if (d.command === "toggle") playerRef.current?.toggle();
+        else {
+          const level = playerRef.current?.volume(d.command === "volume_up" ? 10 : -10);
+          if (level !== null && level !== undefined) push(`${level ? "🔊" : "🔇"} Volume ${level}`, "info", 2000);
+        }
+        break;
       default:
         break;
     }
@@ -146,6 +165,7 @@ export default function HostScreen() {
       else if (e.key === "n" || e.key === "N") act("skip-song");
       else if (e.key === "s" || e.key === "S") act("spin");
       else if (e.key === "h" || e.key === "H") setControlsVisible((v) => !v);
+      else if (e.key === "g" || e.key === "G") act("start-now");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -155,6 +175,8 @@ export default function HostScreen() {
   const round = state?.round;
   const spinLeft = useCountdown(round?.spun_at ? round.spun_at + round.spin_seconds : null, serverNow, 0);
   const spinning = !!round?.spun_at && spinLeft > 0;
+  const readyLeft = useCountdown(nowPlaying?.starts_at || null, serverNow, 0);
+  const gettingReady = !!nowPlaying && readyLeft > 0;
 
   if (!checked) {
     return <PremiumChecklist onContinue={() => {
@@ -226,13 +248,27 @@ export default function HostScreen() {
       <main className="tv-main">
         <section className="tv-stage">
           <div className="player-wrap">
-            <YouTubePlayer ref={playerRef} videoId={nowPlaying?.video_id} itemId={nowPlaying?.id}
+            <YouTubePlayer ref={playerRef} videoId={gettingReady ? null : nowPlaying?.video_id} itemId={nowPlaying?.id}
                            onStateChange={setPlayerState}
                            onEnded={(itemId) => call(`/api/host/events/${eventId}/player`,
                              { method: "POST", body: { item_id: itemId, state: "ended" } })}
                            onError={(itemId, code) => call(`/api/host/events/${eventId}/player`,
                              { method: "POST", body: { item_id: itemId, state: "error", code } })} />
-            {idle && (
+            {gettingReady && (
+              <div className="idle-overlay get-ready" aria-live="assertive">
+                <div className="get-ready-box">
+                  <div className="label">Get ready!</div>
+                  <div className="get-ready-name">{singers(nowPlaying)}</div>
+                  <div className="get-ready-title">{decodeEntities(nowPlaying.title)}</div>
+                  <div className="get-ready-count" key={Math.ceil(readyLeft)}>{Math.ceil(readyLeft)}</div>
+                  <div className="muted">Grab the mic! The song starts when the countdown ends.</div>
+                </div>
+              </div>
+            )}
+            {idle && ev.status === "ended" && state.recap && (
+              <div className="idle-overlay recap-overlay"><Recap recap={state.recap} eventName={ev.name} /></div>
+            )}
+            {idle && !(ev.status === "ended" && state.recap) && (
               <div className="idle-overlay">
                 {spinning ? roundPanel : (
                   <>
@@ -247,11 +283,18 @@ export default function HostScreen() {
                 )}
               </div>
             )}
+            <div className="reactions-layer" aria-hidden="true">
+              {reactions.map((r) => (
+                <span key={r.id} className="reaction" style={{ left: `${r.left}%`, "--drift": `${r.drift}px` }}>
+                  {r.emoji}<small>{r.name}</small>
+                </span>
+              ))}
+            </div>
           </div>
           {nowPlaying && (
             <div className="now-singing">
-              <div className="label">Now singing</div>
-              <div className="now-name">{nowPlaying.guest_name}</div>
+              <div className="label">{gettingReady ? "Up now" : "Now singing"}</div>
+              <div className="now-name">{singers(nowPlaying)}</div>
               <div className="now-title">{decodeEntities(nowPlaying.title)}</div>
               {nowPlaying.is_superset && nowPlaying.flags > 0 && <span className="flag-badge">⚑ {nowPlaying.flags}</span>}
             </div>
@@ -272,7 +315,7 @@ export default function HostScreen() {
                     <div className="q-title">{decodeEntities(item.title)}</div>
                     <div className="q-meta">
                       {idx === 0 && <span className="next-tag">Up next</span>}
-                      <span className="q-singer">{item.guest_name}</span>
+                      <span className="q-singer">{singers(item)}</span>
                       {newNames.has(item.guest_id) && <span className="new-tag">New</span>}
                       {item.duration_s ? ` · ${formatDuration(item.duration_s)}` : ""}
                       {item.round && !item.priority ? ` · R${item.round}` : ""}
@@ -310,20 +353,37 @@ export default function HostScreen() {
         {ev.status !== "active" && (
           <button className="btn btn-primary" onClick={() => act("start")} disabled={ev.status === "ended"}>▶ Start event</button>
         )}
-        <button className="btn" onClick={() => (nowPlaying ? playerRef.current?.toggle() : act("play-next"))}>
-          {playerState === 1 ? "⏸ Pause video" : "▶ Play video"}
-        </button>
+        {gettingReady ? (
+          <button className="btn btn-primary" onClick={() => act("start-now")}>⏩ Start now</button>
+        ) : (
+          <button className="btn" onClick={() => (nowPlaying ? playerRef.current?.toggle() : act("play-next"))}>
+            {playerState === 1 ? "⏸ Pause video" : "▶ Play video"}
+          </button>
+        )}
         <button className="btn" onClick={() => act("skip-song")} disabled={!nowPlaying && !state.queue.length}>⏭ Skip song</button>
         <button className="btn" onClick={() => act("spin")} disabled={!round.number}>🎰 Re-spin theme</button>
         {(superset || ev.superset_pending === "force")
           ? <button className="btn" onClick={() => act("superset-cancel")}>✖ Cancel superset</button>
           : <button className="btn btn-gold" onClick={() => act("superset-force")}>★ Force superset</button>}
         <span className="spacer" />
+        <button className="btn" onClick={() => setShowRemote(true)}>📱 Remote</button>
         <Link className="btn" to="/host/admin">Admin</Link>
         <button className="btn" onClick={() => document.documentElement.requestFullscreen?.()}>⛶</button>
         <button className="btn btn-danger" disabled={ev.status === "ended"}
                 onClick={() => act("end", "End this event for everyone? The queue will be cleared.")}>End event</button>
       </footer>
+      {showRemote && (
+        <div className="modal-backdrop" onClick={() => setShowRemote(false)}>
+          <div className="card modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Phone remote</h2>
+            <p className="muted">Scan with your phone to skip, pause, change the volume and manage the queue from
+              anywhere in the room. You'll sign in with the host PIN.</p>
+            <img className="remote-qr" src={`/api/host/events/${eventId}/remote-qr.svg`} alt="QR code for the host remote" />
+            <p className="join-url small">{joinUrl.replace(/\/join\/[^/]+$/, "")}/host/remote/{eventId}</p>
+            <button className="btn btn-primary btn-block" onClick={() => setShowRemote(false)}>Done</button>
+          </div>
+        </div>
+      )}
       <Toasts toasts={toasts} />
     </div>
   );

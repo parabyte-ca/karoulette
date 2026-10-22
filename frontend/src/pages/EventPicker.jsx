@@ -54,7 +54,10 @@ export default function EventPicker() {
                   {" "}{ev.guest_count} singers · {ev.songs_played} songs sung
                 </div>
               </div>
-              <Link className="btn btn-primary" to={`/host/event/${ev.id}`}>Open TV screen</Link>
+              <span className="actions">
+                <Link className="btn" to={`/host/remote/${ev.id}`} title="Control the event from this phone">📱 Remote</Link>
+                <Link className="btn btn-primary" to={`/host/event/${ev.id}`}>Open TV screen</Link>
+              </span>
             </li>
           ))}
         </ul>

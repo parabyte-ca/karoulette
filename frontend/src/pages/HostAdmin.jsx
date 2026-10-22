@@ -92,12 +92,15 @@ function EventSettings({ eventId, push, onChanged }) {
   const [state, setState] = useState(null);
   const [cfg, setCfg] = useState(null);
   const [name, setName] = useState("");
+  const [codes, setCodes] = useState({});
 
   const load = () => api(`/api/host/events/${eventId}/state`).then((s) => {
     setState(s);
     setCfg({ ...s.event.config, superset_chance: Math.round(s.event.config.superset_chance * 100) });
     setName(s.event.name);
-  }).catch((e) => push(e.message, "error"));
+    return api(`/api/host/events/${eventId}/guests`);
+  }).then((gs) => setCodes(Object.fromEntries(gs.map((g) => [g.id, g.rejoin_code]))))
+    .catch((e) => push(e.message, "error"));
   useEffect(() => { load(); }, [eventId]);
 
   if (!state || !cfg) return <p className="muted">Loading…</p>;
@@ -114,6 +117,8 @@ function EventSettings({ eventId, push, onChanged }) {
             superset_chance: Number(cfg.superset_chance) / 100,
             recent_theme_window: Number(cfg.recent_theme_window),
             max_duration_s: Number(cfg.max_duration_s),
+            ready_seconds: Number(cfg.ready_seconds),
+            max_songs_per_singer: Number(cfg.max_songs_per_singer),
           },
         },
       });
@@ -161,8 +166,10 @@ function EventSettings({ eventId, push, onChanged }) {
           <label className="field"><span>Event name</span>
             <input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} /></label>
           {field("superset_chance", "Superset chance per round (%)", { type: "number", min: 0, max: 100 })}
-          {field("recent_theme_window", "Avoid themes used in the last N turns", { type: "number", min: 0, max: 20 })}
+          {field("recent_theme_window", "Avoid themes used in the last N rounds", { type: "number", min: 0, max: 20 })}
           {field("max_duration_s", "Longest video allowed (seconds, 0 = no limit)", { type: "number", min: 0, max: 3600 })}
+          {field("ready_seconds", "“Get ready” countdown before each song (seconds, 0 = off)", { type: "number", min: 0, max: 60 })}
+          {field("max_songs_per_singer", "Songs each singer can have waiting (0 = no limit)", { type: "number", min: 0, max: 50 })}
           <label className="field"><span>Safe search</span>
             <select value={cfg.safe_search} onChange={(e) => setCfg({ ...cfg, safe_search: e.target.value })}>
               <option value="none">Off</option>
@@ -173,9 +180,10 @@ function EventSettings({ eventId, push, onChanged }) {
         </div>
         {toggle("prevent_duplicates", "Prevent the same song twice in one event")}
         {toggle("autoplay", "Start playing automatically when the first song is queued")}
-        <div className="row">
+        <div className="row wrap">
           <button className="btn btn-primary">Save settings</button>
           <Link className="btn" to={`/host/event/${eventId}`}>Open TV screen</Link>
+          <Link className="btn" to={`/host/remote/${eventId}`}>📱 Phone remote</Link>
           <a className="btn" href={`/api/host/events/${eventId}/history.csv`}>Export song history (CSV)</a>
           <span className="spacer" />
           <button type="button" className="btn btn-danger" onClick={del}>Delete event</button>
@@ -185,7 +193,8 @@ function EventSettings({ eventId, push, onChanged }) {
       <section className="card">
         <h2>Singer order ({state.guests.length})</h2>
         <p className="muted small">Songs play one per singer per round, in this order. New singers who join mid-event
-          are slotted in right after whoever is singing.</p>
+          are slotted in right after whoever is singing. A singer who switches phones can rejoin with the code shown
+          beside their name.</p>
         {!state.guests.length && <p className="muted">Nobody has joined yet.</p>}
         <ol className="list">
           {state.guests.map((g, idx) => (
@@ -195,6 +204,7 @@ function EventSettings({ eventId, push, onChanged }) {
                 {state.now_playing?.guest_id === g.id && <span className="pill">Singing</span>}
                 {g.new_singer && <span className="pill">New singer</span>}
                 <span className="muted small"> · {g.queued} queued</span>
+                {codes[g.id] && <span className="muted small" title="Rejoin code: lets this singer switch phones"> · rejoin <code>{codes[g.id]}</code></span>}
               </span>
               <span className="actions">
                 <button className="btn" title="Earlier in the order" disabled={idx === 0}

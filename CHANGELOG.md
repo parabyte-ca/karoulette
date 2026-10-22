@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.0] - 2026-10-22
+### Added
+- **"Get ready" screen** before every song: the TV shows the singer, the song and a countdown so they can reach the mic. Set the length per event in Host admin → Events (default 5 seconds, 0 turns it off); **Start now** (or <kbd>G</kbd>) skips it.
+- **Host remote** for your phone (`/host/remote/<event>`, or scan the TV's **📱 Remote** QR code): pause/play, volume, skip, stop, start now, re-spin, Supersets, play next and remove.
+- **Nearly-up alerts** on phones ("two songs to go", "up next", "you're up!") with vibration, optional system notifications, and an estimated wait beside every queued song.
+- **Song limit per singer**: an optional cap on how many songs each singer can have waiting (Host admin → Events; 0 = no limit).
+- **Duets**: sing a song with another guest. Both names show on the TV and both phones get the alerts; the partner can step out.
+- **Crowd reactions**: 👏 🔥 😂 ❤️ 🎉 🤘 buttons on phones float up the TV while someone sings.
+- **End-of-night recap** on the TV and phones: songs, singers, minutes, duets, most songs, top themes, Superset stars, first and last songs, and each guest's own count.
+- **Rejoin code** for switching phones: keeps your name, place and songs, and signs the old phone out. Hosts can see every code in Host admin.
+- **Install as an app**: web app manifest, icons and a service worker, plus an "Install Karoulette" button on phones (HTTPS needed).
+- **Mirror Ball** colour scheme: a 70s disco with a mirror ball, light rays and flecks of pink, ice blue and gold sweeping the room.
+- **Browser tests** (Playwright) for the TV, phones and remote, run in CI on every pull request.
+
+### Changed
+- Database columns for the countdown, duets and rejoin codes are added automatically on upgrade.
+- The "Avoid themes" setting now says rounds instead of turns.
+
 ## [0.6.0] - 2026-10-22
 ### Changed
 - **Singers add songs any time, as many as they like**: no more waiting for a turn. The queue is a fair round-robin: one song per singer per round, each round in singer order, so the order is kept however many songs people queue. Songs can be added before the event starts.

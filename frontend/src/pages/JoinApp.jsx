@@ -1,15 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, guestSession } from "../lib/api";
 import { applyScheme } from "../lib/schemes";
 import { useCountdown, useEventSocket } from "../lib/useEventSocket";
 import { decodeEntities, formatDuration } from "../lib/format";
 import ThemeSpinner from "../components/ThemeSpinner";
+import Recap from "../components/Recap";
 import { Toasts, useToasts } from "../components/Toasts";
+import { formatWait, secondsUntil, singers, sings } from "../lib/eta";
+import { alertsSupported, notify, useInstall } from "../lib/pwa";
 
 function JoinForm({ initialCode, onJoined }) {
   const [code, setCode] = useState((initialCode || "").toUpperCase());
   const [name, setName] = useState("");
+  const [rejoin, setRejoin] = useState(false);
+  const [rejoinCode, setRejoinCode] = useState("");
   const [eventName, setEventName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -27,7 +32,9 @@ function JoinForm({ initialCode, onJoined }) {
     setBusy(true);
     setError("");
     try {
-      const res = await api("/api/guest/join", { method: "POST", body: { code: code.trim(), name: name.trim() } });
+      const res = rejoin
+        ? await api("/api/guest/rejoin", { method: "POST", body: { code: code.trim(), rejoin_code: rejoinCode.trim() } })
+        : await api("/api/guest/join", { method: "POST", body: { code: code.trim(), name: name.trim() } });
       guestSession.save(res.token, res.event.join_code);
       onJoined(res);
     } catch (err) {
@@ -47,21 +54,40 @@ function JoinForm({ initialCode, onJoined }) {
           <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
                  maxLength={10} autoCapitalize="characters" autoComplete="off" required placeholder="ABCDE" />
         </label>
-        <label className="field">
-          <span>Your display name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={24} required autoFocus={!!code}
-                 placeholder="What should the TV call you?" autoComplete="nickname" />
-        </label>
+        {rejoin ? (
+          <label className="field">
+            <span>Your rejoin code</span>
+            <input value={rejoinCode} maxLength={6} required autoFocus autoCapitalize="characters" autoComplete="off"
+                   onChange={(e) => setRejoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
+                   placeholder="6 letters and numbers" className="code-input" />
+          </label>
+        ) : (
+          <label className="field">
+            <span>Your display name</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={24} required autoFocus={!!code}
+                   placeholder="What should the TV call you?" autoComplete="nickname" />
+          </label>
+        )}
         {error && <p className="error">{error}</p>}
-        <button className="btn btn-primary btn-block btn-xl" disabled={busy || !name.trim() || !code}>Join the rotation</button>
-        <p className="muted small">No account needed. You'll sing in the order people joined.</p>
+        {rejoin ? (
+          <button className="btn btn-primary btn-block btn-xl" disabled={busy || rejoinCode.length !== 6 || !code}>Rejoin</button>
+        ) : (
+          <button className="btn btn-primary btn-block btn-xl" disabled={busy || !name.trim() || !code}>Join the rotation</button>
+        )}
+        <p className="muted small">{rejoin
+          ? "Your code is at the bottom of your old phone's screen, or ask the host: it's in Host admin."
+          : "No account needed. You'll sing in the order people joined."}</p>
+        <button type="button" className="btn btn-link btn-block" onClick={() => { setRejoin(!rejoin); setError(""); }}>
+          {rejoin ? "New here? Join with your name" : "Switched phones? Rejoin with your code"}
+        </button>
       </form>
     </main>
   );
 }
 
-function SearchPanel({ canAdd, onAdd, push, superset, theme }) {
+function SearchPanel({ canAdd, limitNote, onAdd, push, superset, partners }) {
   const [q, setQ] = useState("");
+  const [duet, setDuet] = useState("");
   const [results, setResults] = useState(null);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(null);
@@ -87,9 +113,10 @@ function SearchPanel({ canAdd, onAdd, push, superset, theme }) {
   const add = async (r) => {
     setAdding(r.video_id);
     try {
-      await onAdd(r);
+      await onAdd(r, duet ? Number(duet) : null);
       setResults(null);
       setQ("");
+      setDuet("");
     } catch (err) {
       push(err.message, "error");
     } finally {
@@ -106,6 +133,16 @@ function SearchPanel({ canAdd, onAdd, push, superset, theme }) {
       </form>
       <p className="muted small">We add “karaoke” to your search for you.
         {superset && " Superset round: your pick must fit the theme, or others can flag it!"}</p>
+      {partners.length > 0 && (
+        <label className="duet-pick">
+          <span>Sing it</span>
+          <select value={duet} onChange={(e) => setDuet(e.target.value)}>
+            <option value="">Solo</option>
+            {partners.map((g) => <option key={g.id} value={g.id}>As a duet with {g.name}</option>)}
+          </select>
+        </label>
+      )}
+      {limitNote && <p className="warning small">{limitNote}</p>}
       {note && <p className="warning small">{note}</p>}
       {results && !results.length && <p className="muted">No karaoke versions found. Try different words.</p>}
       {results && (
@@ -128,11 +165,36 @@ function SearchPanel({ canAdd, onAdd, push, superset, theme }) {
   );
 }
 
+function ReactionBar({ emojis, push }) {
+  const last = useRef(0);
+  const [popped, setPopped] = useState(null);
+  const send = async (emoji) => {
+    const now = Date.now();
+    if (now - last.current < 350) return;
+    last.current = now;
+    setPopped(emoji + now);
+    try { await api("/api/guest/react", { method: "POST", guest: true, body: { emoji } }); }
+    catch (e) { if (e.status === 429) push("Easy there! Give the cheers a second.", "info", 2500); }
+  };
+  return (
+    <div className="reaction-bar" role="group" aria-label="Cheer for the singer">
+      {emojis.map((e) => (
+        // A new key on each tap restarts the pop animation.
+        <button key={popped?.startsWith(e) ? popped : e} className={`reaction-btn ${popped?.startsWith(e) ? "popped" : ""}`}
+                onClick={() => send(e)} aria-label={`Send ${e}`}>{e}</button>
+      ))}
+    </div>
+  );
+}
+
 function GuestHome({ me, onLeave }) {
   const { toasts, push } = useToasts();
   const [tab, setTab] = useState("me");
   const [spinMeta, setSpinMeta] = useState({ candidates: [] });
   const [themes, setThemes] = useState([]);
+  const [alerts, setAlerts] = useState(() => alertsSupported() && Notification.permission === "granted");
+  const { canInstall, install, iosHint } = useInstall();
+  const prevIdx = useRef(null);
   const myId = me.guest.id;
 
   useEffect(() => { api("/api/public/themes").then(setThemes).catch(() => {}); }, []);
@@ -144,10 +206,22 @@ function GuestHome({ me, onLeave }) {
       case "notice": push(d.text, d.level); break;
       case "theme_spun": setSpinMeta({ candidates: d.candidates }); break;
       case "song_error": push(`Your song “${decodeEntities(d.title)}” couldn't play. Pick another and it plays straight away!`, "warning", 9000); break;
-      case "you_are_singing": push("🎤 You're singing now! Grab the mic.", "success", 9000); navigator.vibrate?.([200, 100, 200]); break;
-      case "you_are_next": push("You're up next on the mic. Get ready!", "info", 8000); navigator.vibrate?.([300, 150, 300]); break;
+      case "you_are_singing":
+        push("🎤 You're up! Grab the mic.", "success", 9000);
+        navigator.vibrate?.([200, 100, 200]);
+        notify("🎤 You're up!", `Grab the mic: ${decodeEntities(d.title)}`);
+        break;
+      case "you_are_next":
+        push("You're up next on the mic. Get ready!", "info", 8000);
+        navigator.vibrate?.([300, 150, 300]);
+        notify("You're up next!", `Head to the mic: ${decodeEntities(d.title)} is next.`);
+        break;
+      case "duet_invite": push(`🎶 ${d.name} added you to a duet: “${decodeEntities(d.title)}”`, "success", 9000); break;
+      case "session_replaced":
+        window.alert("You signed in on another phone, so this one has been signed out.");
+        onLeave();
+        break;
       case "superset": if (d.active) push(`★ SUPERSET round! Everyone sings: ${d.theme?.name}`, "gold", 9000); break;
-      case "event_ended": push("The event has ended. Thanks for singing!", "info", 10000); break;
       case "guest_left":
         if (d.guest_id === myId && d.reason === "removed") {
           window.alert("The host removed you from this event.");
@@ -164,12 +238,35 @@ function GuestHome({ me, onLeave }) {
   useEffect(() => { if (state?.appearance) applyScheme(state.appearance.scheme); }, [state?.appearance?.scheme]);
   const round = state?.round;
   const spinLeft = useCountdown(round?.spun_at ? round.spun_at + round.spin_seconds : null, serverNow, 0);
+  const readyLeft = useCountdown(state?.now_playing?.starts_at || null, serverNow, 0);
 
-  const addSong = async (r) => {
+  const addSong = async (r, duetId) => {
     await api("/api/guest/queue", { method: "POST", guest: true,
-      body: { video_id: r.video_id, title: r.title, channel: r.channel, thumbnail: r.thumbnail } });
-    push("Song added! 🎶 Add as many as you like.", "success");
+      body: { video_id: r.video_id, title: r.title, channel: r.channel, thumbnail: r.thumbnail, duet_guest_id: duetId } });
+    push(duetId ? "Duet added! 🎶 Your partner gets a heads-up." : "Song added! 🎶 Add as many as you like.", "success");
   };
+
+  const turnOnAlerts = async () => {
+    try {
+      const result = await Notification.requestPermission();
+      setAlerts(result === "granted");
+      push(result === "granted" ? "🔔 Alerts on. We'll buzz you when you're nearly up." : "Alerts are blocked in your browser settings.",
+        result === "granted" ? "success" : "warning");
+    } catch { /* unsupported */ }
+  };
+
+  // Heads-up when two songs stand between you and the mic (the server sends "up next" itself).
+  const firstMine = state ? state.queue.findIndex((i) => sings(i, myId)) : -1;
+  useEffect(() => {
+    if (!state) return;
+    const prev = prevIdx.current;
+    prevIdx.current = firstMine;
+    if (firstMine === 1 && prev !== null && prev > 1) {
+      push("⏳ Nearly your turn: two songs to go. Head towards the mic!", "info", 9000);
+      navigator.vibrate?.([150, 100, 150]);
+      notify("Nearly your turn!", "Two songs to go. Head towards the mic.");
+    }
+  }, [firstMine, state, push]);
 
   const songAction = async (path, opts = {}) => {
     try { await api(path, { method: "POST", guest: true, ...opts }); } catch (e) { push(e.message, "error"); }
@@ -187,18 +284,26 @@ function GuestHome({ me, onLeave }) {
   const superset = round.is_superset;
   const spinning = !!round.spun_at && spinLeft > 0;
   const mySongs = state.queue.filter((i) => i.guest_id === myId);
-  const singingNow = state.now_playing?.guest_id === myId;
-  const firstIdx = state.queue.findIndex((i) => i.guest_id === myId);
+  const myDuets = state.queue.filter((i) => i.duet_guest_id === myId);
+  const singingNow = sings(state.now_playing, myId);
+  const firstIdx = firstMine;
   const me_ = state.guests.find((g) => g.id === myId);
+  const now = serverNow() / 1000;
+  const gettingReady = singingNow && readyLeft > 0;
+  const cap = Number(ev.config.max_songs_per_singer) || 0;
+  const atCap = cap > 0 && mySongs.length >= cap;
+  const wait = (idx) => formatWait(secondsUntil(state, idx, now));
 
   let headline;
   let sub = null;
   if (ev.status === "ended") { headline = "Thanks for singing!"; sub = "This event has ended."; }
+  else if (gettingReady) { headline = "🎤 You're up! Grab the mic"; sub = `Your song starts in ${Math.ceil(readyLeft)} s.`; }
   else if (singingNow) headline = "🎤 You're singing now!";
-  else if (firstIdx === 0) headline = "Your song is up next!";
-  else if (firstIdx > 0) headline = `${firstIdx} song${firstIdx === 1 ? "" : "s"} before yours`;
+  else if (firstIdx === 0) { headline = "Your song is up next!"; sub = `About ${wait(0).replace("≈ ", "")} to go. Get ready!`; }
+  else if (firstIdx > 0) { headline = `${firstIdx} song${firstIdx === 1 ? "" : "s"} before yours`; sub = `You're on in ${wait(firstIdx)}.`; }
   else { headline = "Pick a song!"; sub = me_?.new_singer ? "You're a new singer: your first song goes next in line." : "Add as many as you like. They play in singer order, one per round."; }
   if (ev.status === "draft") sub = "The host hasn't started yet, but you can add songs now.";
+  const partners = state.guests.filter((g) => g.id !== myId);
 
   return (
     <div className={`phone ${superset ? "is-superset" : ""}`}>
@@ -225,9 +330,12 @@ function GuestHome({ me, onLeave }) {
       {tab === "me" && (
         <>
           <div className={`status-card ${firstIdx === 0 || singingNow ? "your-turn" : ""} ${superset ? "superset" : ""}`}>
-            <div className={`status-big ${firstIdx === 0 ? "pulse" : ""}`}>{headline}</div>
+            <div className={`status-big ${firstIdx === 0 || gettingReady ? "pulse" : ""}`}>{headline}</div>
             {sub && <div className="muted">{sub}</div>}
-            {round.number > 0 && (
+            {ev.status !== "ended" && alertsSupported() && !alerts && (
+              <button className="btn btn-link small" onClick={turnOnAlerts}>🔔 Buzz me when I'm nearly up</button>
+            )}
+            {round.number > 0 && ev.status !== "ended" && (
               <div className="round-theme">
                 <div className="label">Round {round.number} theme</div>
                 {spinning ? (
@@ -243,8 +351,13 @@ function GuestHome({ me, onLeave }) {
             )}
           </div>
 
-          {ev.status !== "ended" && <SearchPanel canAdd onAdd={addSong} push={push} superset={superset}
-                                                 theme={round.theme?.name} />}
+          {ev.status === "ended" && state.recap && (
+            <section className="card"><Recap recap={state.recap} eventName={ev.name} me={me.guest.name} size="phone" /></section>
+          )}
+
+          {ev.status !== "ended" && <SearchPanel canAdd={!atCap} onAdd={addSong} push={push} superset={superset}
+                                                 partners={partners}
+                                                 limitNote={atCap ? `You have ${mySongs.length} songs waiting, the most the host allows. Add another once one has played.` : ""} />}
 
           {mySongs.length > 0 && (
             <section className="card">
@@ -256,7 +369,8 @@ function GuestHome({ me, onLeave }) {
                     <li key={i.id} className="result mine-song">
                       <div className="r-text">
                         <div className="r-title">{decodeEntities(i.title)}</div>
-                        <div className="r-meta">{pos === 0 ? "Up next" : `#${pos + 1} in the queue`}{i.round ? ` · round ${i.round}` : ""}</div>
+                        <div className="r-meta">{pos === 0 ? "Up next" : `#${pos + 1} in the queue`}{i.round ? ` · round ${i.round}` : ""}
+                          {` · ${wait(pos)}`}{i.duet_name ? ` · duet with ${i.duet_name}` : ""}</div>
                         {pos === 0 && state.queue.length > 1 && (
                           <button className="btn btn-block pass-btn" onClick={() =>
                             window.confirm("Let the next singer go first? Your song plays right after theirs.") &&
@@ -278,6 +392,30 @@ function GuestHome({ me, onLeave }) {
               </ul>
             </section>
           )}
+
+          {myDuets.length > 0 && (
+            <section className="card">
+              <h3>Duets you're in</h3>
+              <ul className="results">
+                {myDuets.map((i) => {
+                  const pos = state.queue.indexOf(i);
+                  return (
+                    <li key={i.id} className="result mine-song">
+                      <div className="r-text">
+                        <div className="r-title">{decodeEntities(i.title)}</div>
+                        <div className="r-meta">With {i.guest_name} · {pos === 0 ? "Up next" : `#${pos + 1} in the queue`} · {wait(pos)}</div>
+                      </div>
+                      <div className="song-actions">
+                        <button className="btn btn-danger" title="Step out of this duet" onClick={() =>
+                          window.confirm(`Step out of this duet? ${i.guest_name} keeps the song.`) &&
+                          songAction(`/api/guest/queue/${i.id}/leave-duet`)}>✕</button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
         </>
       )}
 
@@ -286,17 +424,17 @@ function GuestHome({ me, onLeave }) {
           {state.now_playing && (
             <div className="now-mini">
               <div className="label">Now singing</div>
-              <strong>{state.now_playing.guest_name}</strong> · {decodeEntities(state.now_playing.title)}
+              <strong>{singers(state.now_playing)}</strong> · {decodeEntities(state.now_playing.title)}
             </div>
           )}
           {!state.queue.length && <p className="muted">The queue is empty.</p>}
           <ol className="results">
             {state.queue.map((i) => (
-              <li key={i.id} className={`result ${i.guest_id === myId ? "mine" : ""}`}>
+              <li key={i.id} className={`result ${sings(i, myId) ? "mine" : ""}`}>
                 <img src={i.thumbnail} alt="" loading="lazy" />
                 <div className="r-text">
                   <div className="r-title">{decodeEntities(i.title)}</div>
-                  <div className="r-meta">{i.guest_name}{i.duration_s ? ` · ${formatDuration(i.duration_s)}` : ""}
+                  <div className="r-meta">{singers(i)}{i.duration_s ? ` · ${formatDuration(i.duration_s)}` : ""}
                     {i.flags > 0 ? ` · ⚑ ${i.flags}` : ""}</div>
                 </div>
                 {i.is_superset && i.guest_id !== myId && (
@@ -321,8 +459,15 @@ function GuestHome({ me, onLeave }) {
       )}
 
       <footer className="phone-footer">
+        {me.guest.rejoin_code && ev.status !== "ended" && (
+          <p className="rejoin-note small">Your rejoin code: <strong className="rejoin-code">{me.guest.rejoin_code}</strong>
+            <br /><span className="muted">Switching phones? Use it with the event code to keep your place and songs.</span></p>
+        )}
+        {canInstall && <button className="btn" onClick={install}>📲 Install Karoulette</button>}
+        {iosHint && <p className="muted small">Tip: tap Share, then “Add to Home Screen” to keep Karoulette one tap away.</p>}
         <button className="btn btn-link" onClick={leave}>Leave event</button>
       </footer>
+      {state.now_playing && ev.status === "active" && <ReactionBar emojis={state.reactions || []} push={push} />}
       <Toasts toasts={toasts} />
     </div>
   );

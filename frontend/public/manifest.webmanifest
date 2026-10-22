@@ -1,0 +1,16 @@
+{
+  "name": "Karoulette",
+  "short_name": "Karoulette",
+  "description": "Karaoke night with a spin: queue songs from your phone and watch the line-up live.",
+  "lang": "en-CA",
+  "start_url": "/join",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0b14",
+  "theme_color": "#0b0b14",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
