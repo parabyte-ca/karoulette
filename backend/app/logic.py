@@ -1,4 +1,4 @@
-"""Pure, side-effect-free game logic: rotation, theme picking, superset rolls and queue ordering.
+"""Pure, side-effect-free game logic: singer order, fair queue order, theme picking and superset rolls.
 
 Everything here works on plain dicts so it can be unit tested without a database.
 """
@@ -10,30 +10,26 @@ import unicodedata
 from typing import Iterable, Sequence
 
 DEFAULT_EVENT_CONFIG: dict = {
-    "turn_seconds": 180,
     "superset_chance": 0.15,
     "recent_theme_window": 3,
     "prevent_duplicates": True,
     "safe_search": "moderate",   # none | moderate | strict
     "max_duration_s": 900,       # 0 disables the limit
     "autoplay": True,
-    "announce_seconds": 4,
     "spin_seconds": 5,
 }
 
 CONFIG_LIMITS: dict = {
-    "turn_seconds": (15, 600),
     "superset_chance": (0.0, 1.0),
     "recent_theme_window": (0, 20),
     "max_duration_s": (0, 3600),
-    "announce_seconds": (0, 15),
     "spin_seconds": (1, 15),
 }
 
 
 def merge_config(base: dict, overrides: dict | None) -> dict:
     """Merge overrides into a config, validating types and clamping to sane limits."""
-    cfg = {**DEFAULT_EVENT_CONFIG, **(base or {})}
+    cfg = {**DEFAULT_EVENT_CONFIG, **{k: v for k, v in (base or {}).items() if k in DEFAULT_EVENT_CONFIG}}
     for key, value in (overrides or {}).items():
         if key not in DEFAULT_EVENT_CONFIG or value is None:
             continue
@@ -51,71 +47,63 @@ def merge_config(base: dict, overrides: dict | None) -> dict:
     return cfg
 
 
-# --------------------------------------------------------------------------- rotation
+# --------------------------------------------------------------------------- singer order
 
 def ordered_active(guests: Iterable[dict]) -> list[dict]:
     return sorted((g for g in guests if g.get("status", "active") == "active"),
                   key=lambda g: (g["rotation_pos"], g["id"]))
 
 
-def next_in_rotation(guests: Sequence[dict], cursor_pos: int | None):
-    """Pick the next singer after ``cursor_pos`` in fixed join order.
-
-    Returns ``(guest | None, wrapped, skipped_ids)``. ``wrapped`` is True when the
-    rotation passed the end of the order (i.e. a new round starts). Guests flagged
-    ``skip_next`` are passed over once and reported in ``skipped_ids``.
-    """
-    order = ordered_active(guests)
-    if not order:
-        return None, False, []
-    if cursor_pos is None:
-        seq = [(g, True) for g in order]
-    else:
-        after = [(g, False) for g in order if g["rotation_pos"] > cursor_pos]
-        before = [(g, True) for g in order if g["rotation_pos"] <= cursor_pos]
-        seq = after + before
-    skipped: list[int] = []
-    for guest, wrapped in seq:
-        if guest.get("skip_next"):
-            skipped.append(guest["id"])
-            continue
-        return guest, wrapped, skipped
-    # Everyone asked to be skipped: consume the skips and take the first in line anyway.
-    guest, wrapped = seq[0]
-    return guest, wrapped, skipped
-
-
-def upcoming_order(guests: Sequence[dict], cursor_pos: int | None, exclude_id: int | None = None,
-                   pending: Sequence[dict] = ()) -> list[int]:
-    """Guest ids in the order they will pick next.
-
-    ``pending`` holds bonus re-picks and passed singers ({guest_id, kind, after_guest_id, ready}).
-    Ready entries come first; a passed singer who is still waiting slots in right after the
-    singer they let go ahead. A guest may appear twice (a moved turn and their next regular one).
-    """
-    order = ordered_active(guests)
-    active = {g["id"] for g in order}
-    if cursor_pos is None:
-        seq = order
-    else:
-        seq = [g for g in order if g["rotation_pos"] > cursor_pos] + \
-              [g for g in order if g["rotation_pos"] <= cursor_pos]
-    pending = [p for p in pending if p["guest_id"] in active]
-    head = [p["guest_id"] for p in pending
-            if p.get("kind") != "deferred" or p.get("ready") or p.get("after_guest_id") not in active]
-    waiting = [p for p in pending if p["guest_id"] not in head and p.get("kind") == "deferred"]
-    out = list(head)
-    for g in seq:
-        if g["id"] == exclude_id:
-            continue
-        out.append(g["id"])
-        out.extend(p["guest_id"] for p in waiting if p.get("after_guest_id") == g["id"])
-    return out
-
-
 def next_rotation_pos(guests: Iterable[dict]) -> int:
     positions = [g["rotation_pos"] for g in guests]
     return (max(positions) + 1) if positions else 1
+
+
+def newcomer_position(guests: Sequence[dict], anchor_pos: int | None, newcomer_id: int | None = None) -> int | None:
+    """Where a new singer goes: right after the singer on the mic (``anchor_pos``), behind any other
+    newcomers still waiting for their first song. ``None`` means "append to the end" (nobody has sung
+    in this round yet, so join order applies)."""
+    if anchor_pos is None:
+        return None
+    pos = anchor_pos + 1
+    waiting = {g["rotation_pos"] for g in ordered_active(guests)
+               if g.get("debut_pending") and g["id"] != newcomer_id}
+    while pos in waiting:
+        pos += 1
+    return pos
+
+
+# --------------------------------------------------------------------------- fair queue
+
+def assign_round(current_round: int, anchor_pos: int | None, singer_pos: int, last_round: int | None) -> int:
+    """The round a singer's new song belongs to: one song per singer per round, in singer order.
+
+    It goes in the current round if the singer's slot in it is still ahead of the singer on the mic
+    and they have no song there yet; otherwise in the next round after their last song.
+    """
+    current_round = max(current_round, 1)
+    slot_ahead = anchor_pos is None or singer_pos > anchor_pos
+    base = current_round if slot_ahead else current_round + 1
+    return max(base, (last_round or 0) + 1)
+
+
+def sort_key(item: dict, positions: dict[int, int], current_round: int) -> tuple:
+    """Play order: prioritised songs first (host "play next", re-pick after an embed error), then by
+    round, then by the singer's place in the order (``order_bias`` lets a singer step back a place)."""
+    if item.get("priority") is not None:
+        return (0, float(item["priority"]), 0, 0.0, item["id"])
+    rnd = item.get("round_no") or max(current_round, 1)
+    pos = positions.get(item["guest_id"], 10 ** 6) + float(item.get("order_bias") or 0)
+    return (1, 0.0, rnd, pos, item["id"])
+
+
+def play_order(items: Iterable[dict], positions: dict[int, int] | None = None, current_round: int = 1) -> list[dict]:
+    positions = positions or {}
+    return sorted((i for i in items if i["status"] == "queued"), key=lambda i: sort_key(i, positions, current_round))
+
+
+def is_duplicate(items: Iterable[dict], video_id: str) -> bool:
+    return any(i["video_id"] == video_id and i["status"] in ("queued", "playing", "played") for i in items)
 
 
 # --------------------------------------------------------------------------- themes
@@ -147,30 +135,6 @@ def roll_superset(chance: float, pending: str | None, rng: random.Random) -> boo
     if pending == "cancel":
         return False
     return rng.random() < chance
-
-
-# --------------------------------------------------------------------------- queue
-
-def play_order(items: Iterable[dict]) -> list[dict]:
-    return sorted((i for i in items if i["status"] == "queued"), key=lambda i: (i["position"], i["id"]))
-
-
-def append_position(items: Iterable[dict]) -> float:
-    positions = [i["position"] for i in items]
-    return (max(positions) + 1.0) if positions else 1.0
-
-
-def move_item(ordered_ids: list[int], item_id: int, new_index: int) -> list[int]:
-    if item_id not in ordered_ids:
-        raise ValueError("Item is not in the queue")
-    ids = [i for i in ordered_ids if i != item_id]
-    new_index = max(0, min(new_index, len(ids)))
-    ids.insert(new_index, item_id)
-    return ids
-
-
-def is_duplicate(items: Iterable[dict], video_id: str) -> bool:
-    return any(i["video_id"] == video_id and i["status"] in ("queued", "playing", "played") for i in items)
 
 
 # --------------------------------------------------------------------------- misc

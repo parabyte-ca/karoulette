@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -131,6 +131,19 @@ CREATE TABLE IF NOT EXISTS quota_ledger (
 """
 
 
+# Columns added after the first release (v0.6.0: free song submission with a fair round-robin queue).
+ADDED_COLUMNS = [
+    ("queue_items", "round_no", "INTEGER"),            # rotation round this song belongs to
+    ("queue_items", "priority", "REAL"),               # non-NULL = plays before the round-robin, ascending
+    ("queue_items", "order_bias", "REAL NOT NULL DEFAULT 0"),  # a singer stepping back one place
+    ("rounds", "theme_id", "INTEGER"),
+    ("rounds", "theme_name", "TEXT"),
+    ("rounds", "spun_at", "REAL"),
+    ("guests", "debut_pending", "INTEGER NOT NULL DEFAULT 0"),  # joined mid-event, first song not sung yet
+    ("guests", "repick_credit", "INTEGER NOT NULL DEFAULT 0"),  # their last song couldn't play
+]
+
+
 class Database:
     """Single shared connection guarded by a lock. SQLite is fast enough for one venue."""
 
@@ -143,10 +156,20 @@ class Database:
         if self.path != ":memory:":
             self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.executescript(SCHEMA)
+        self._add_missing_columns()
         self.execute(
             "INSERT OR IGNORE INTO settings(key, value) VALUES ('schema_version', ?)",
             (json.dumps(SCHEMA_VERSION),),
         )
+
+    def _add_missing_columns(self) -> None:
+        """Bring databases created by older versions up to date (SQLite only needs ADD COLUMN here)."""
+        for table, column, ddl in ADDED_COLUMNS:
+            have = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if column not in have:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+        self.conn.execute("INSERT INTO settings(key, value) VALUES ('schema_version', ?) "
+                          "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (json.dumps(SCHEMA_VERSION),))
 
     def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
         with self._lock:

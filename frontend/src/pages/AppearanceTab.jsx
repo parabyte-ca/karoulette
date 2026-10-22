@@ -22,8 +22,8 @@ function SchemePreview({ id }) {
           </div>
           <div className="mock-side">
             <div className="mock-turn">
-              <i>Picking now</i>
-              <b>Blake</b>
+              <i>Round 3 theme</i>
+              <b>80s</b>
               <span className="mock-pill">80s</span>
               <div className="mock-bar"><div /></div>
             </div>
@@ -38,7 +38,7 @@ function SchemePreview({ id }) {
       </div>
       <div className="mock-phone">
         <div className="mock-phone-card">
-          <b>Your turn!</b>
+          <b>Up next!</b>
           <span className="mock-pill">80s</span>
           <div className="mock-input" />
           <div className="mock-btn">Search</div>

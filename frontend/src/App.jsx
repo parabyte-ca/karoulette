@@ -9,7 +9,7 @@ function Landing() {
   return (
     <main className="landing">
       <h1 className="brand">Kar<span>oulette</span></h1>
-      <p className="muted">Grab the mic. Take your turn. Sing your heart out.</p>
+      <p className="muted">Grab the mic. Queue your songs. Sing your heart out.</p>
       <div className="landing-actions">
         <Link className="btn btn-primary btn-xl" to="/join">I'm a guest</Link>
         <Link className="btn btn-xl" to="/host">I'm the host</Link>

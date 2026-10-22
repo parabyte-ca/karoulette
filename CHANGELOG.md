@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0] - 2026-10-22
+### Changed
+- **Singers add songs any time, as many as they like**: no more waiting for a turn. The queue is a fair round-robin: one song per singer per round, each round in singer order, so the order is kept however many songs people queue. Songs can be added before the event starts.
+- **One theme spin per round** (each pass through the singer order) instead of per turn; Supersets still lock a round's theme, and only songs in the current Superset round can be flagged.
+- The picking turn, its 3-minute timer, overtime, Skip turn and Pause rotation are gone (nothing to time any more). Embed errors now give the singer's next pick a place at the front of the queue instead of a bonus turn.
+
+### Added
+- **New singers go next in line**: anyone joining after singing has started is slotted right after whoever is on the mic (behind other newcomers still waiting), and the TV shows a "NEW SINGER! Please welcome …" banner when their first song plays. A notice and a "New" tag mark them in the queue until then.
+- Phone "My songs": each song's place and round, move a song ahead of your own others, remove it, and "Not ready? Let the next singer go first" on your up-next song (exactly one song goes ahead).
+- Host: "Play next" on any queued song, move singers up/down the order in admin, round theme history.
+- Database columns for round, priority and newcomers are added automatically on upgrade.
+
 ## [0.5.0] - 2026-10-19
 ### Changed
 - Renamed the project from KaraokeQueue to **Karoulette** (karaoke + roulette) everywhere: UI, page titles, docs, scripts, Docker image (`parabyte-ca/karoulette`, `ghcr.io/parabyte-ca/karoulette`), container (`karoulette`), database file (`karoulette.db`), release names and the upgrade helper's schedule.

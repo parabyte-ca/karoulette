@@ -2,7 +2,9 @@
 
 Every mutating method runs synchronously against SQLite and appends messages to
 ``self.outbox``; the async layer drains the outbox and broadcasts over WebSockets.
-Timing is driven by ``tick()`` using persisted deadlines, so a restart resumes cleanly.
+
+Singers add songs whenever they like. The play order is a fair round-robin: each singer has at
+most one song per round, and within a round songs follow the singer order.
 """
 from __future__ import annotations
 
@@ -72,7 +74,6 @@ class Engine:
         if not ev:
             raise EngineError("Event not found", 404)
         ev["config"] = logic.merge_config(json.loads(ev["config"] or "{}"), None)
-        ev["bonus_queue"] = json.loads(ev["bonus_queue"] or "[]")
         return ev
 
     def event_by_code(self, code: str) -> dict:
@@ -82,8 +83,6 @@ class Engine:
         return self.get_event(row["id"])
 
     def _set(self, event_id: int, **fields) -> None:
-        if "bonus_queue" in fields:
-            fields["bonus_queue"] = json.dumps(fields["bonus_queue"])
         if "config" in fields:
             fields["config"] = json.dumps(fields["config"])
         cols = ", ".join(f"{k} = ?" for k in fields)
@@ -108,11 +107,6 @@ class Engine:
         if round_id is None:
             return None
         return self.db.one("SELECT * FROM rounds WHERE id = ?", (round_id,))
-
-    def _turn(self, turn_id: int | None) -> dict | None:
-        if turn_id is None:
-            return None
-        return self.db.one("SELECT * FROM turns WHERE id = ?", (turn_id,))
 
     def _items(self, event_id: int, statuses: tuple[str, ...] | None = None) -> list[dict]:
         if statuses:
@@ -172,7 +166,7 @@ class Engine:
     def _pick_theme(self, event_id: int) -> dict | None:
         ev = self.get_event(event_id)
         history = [r["theme_id"] for r in self.db.all(
-            "SELECT theme_id FROM turns WHERE event_id = ? AND theme_id IS NOT NULL ORDER BY id DESC LIMIT 50",
+            "SELECT theme_id FROM rounds WHERE event_id = ? AND theme_id IS NOT NULL ORDER BY id DESC LIMIT 50",
             (event_id,))][::-1]
         themes = self.db.all("SELECT * FROM themes")
         return logic.pick_theme(themes, history, int(ev["config"]["recent_theme_window"]), self.rng)
@@ -228,21 +222,22 @@ class Engine:
         if ev["status"] != "active":
             self._set(event_id, status="active", started_at=ev["started_at"] or self.clock())
             self.notice(event_id, "The event has started. Let's sing!")
-        if ev["turn_state"] == "idle" and not ev["rotation_paused"]:
-            self._advance(event_id)
+        if ev["current_round"] == 0:
+            self._start_round(event_id, 1)
+        ev = self.get_event(event_id)
+        if ev["config"]["autoplay"] and not ev["now_playing_item_id"]:
+            self.play_next(event_id)
         self.emit(event_id, "event_started")
 
     def end_event(self, event_id: int) -> None:
         ev = self.get_event(event_id)
         if ev["status"] == "ended":
             return
-        self._close_turn(ev, "skipped")
         self.db.execute("UPDATE queue_items SET status = 'removed' WHERE event_id = ? AND status = 'queued'",
                         (event_id,))
         self.db.execute("UPDATE queue_items SET status = 'played', played_at = ? "
                         "WHERE event_id = ? AND status = 'playing'", (self.clock(), event_id))
-        self._set(event_id, status="ended", ended_at=self.clock(), turn_state="idle", phase_deadline=None,
-                  current_turn_id=None, now_playing_item_id=None, bonus_queue=[])
+        self._set(event_id, status="ended", ended_at=self.clock(), now_playing_item_id=None)
         self.emit(event_id, "event_ended")
         self.notice(event_id, "Thanks for singing! This event has ended.")
 
@@ -250,7 +245,36 @@ class Engine:
         self.get_event(event_id)
         self.db.execute("DELETE FROM events WHERE id = ?", (event_id,))
 
-    # ------------------------------------------------------------------ guests
+    # ------------------------------------------------------------------ singer order
+
+    def _anchor(self, ev: dict) -> dict | None:
+        """The singer on the mic, or the last one to sing in the current round."""
+        item = None
+        if ev["now_playing_item_id"]:
+            item = self.db.one("SELECT * FROM queue_items WHERE id = ?", (ev["now_playing_item_id"],))
+        if item is None and ev["current_round"]:
+            item = self.db.one(
+                "SELECT * FROM queue_items WHERE event_id = ? AND status IN ('played', 'skipped', 'error') "
+                "AND COALESCE(round_no, ?) = ? AND priority IS NULL ORDER BY played_at DESC, id DESC LIMIT 1",
+                (ev["id"], ev["current_round"], ev["current_round"]))
+        return self._guest(item["guest_id"]) if item else None
+
+    def _anchor_pos(self, ev: dict) -> int | None:
+        anchor = self._anchor(ev)
+        return anchor["rotation_pos"] if anchor else None
+
+    def _place_next_in_line(self, ev: dict, guest_id: int) -> bool:
+        """Move a new singer to just after whoever is singing (behind other waiting newcomers)."""
+        pos = logic.newcomer_position(self._guests(ev["id"]), self._anchor_pos(ev), guest_id)
+        if pos is None:
+            return False
+        self.db.execute("UPDATE guests SET rotation_pos = rotation_pos + 1 "
+                        "WHERE event_id = ? AND rotation_pos >= ? AND id != ?", (ev["id"], pos, guest_id))
+        self.db.execute("UPDATE guests SET rotation_pos = ? WHERE id = ?", (pos, guest_id))
+        return True
+
+    def _positions(self, event_id: int) -> dict[int, int]:
+        return {g["id"]: g["rotation_pos"] for g in self._guests(event_id, active_only=False)}
 
     def join(self, event_id: int, display_name: str) -> tuple[dict, str]:
         ev = self.get_event(event_id)
@@ -263,15 +287,18 @@ class Engine:
                        "AND display_name = ? COLLATE NOCASE", (event_id, name)):
             raise EngineError("That name is already taken at this event. Try another.", 409)
         token = secrets.token_urlsafe(32)
-        pos = logic.next_rotation_pos(self._guests(event_id, active_only=False))
+        singing_started = self._anchor(ev) is not None
         guest_id = self.db.insert(
-            "INSERT INTO guests(event_id, display_name, token_hash, rotation_pos, joined_at) VALUES (?, ?, ?, ?, ?)",
-            (event_id, name, hash_token(token), pos, self.clock()))
-        guest = self._guest(guest_id)
-        self.emit(event_id, "guest_joined", {"guest_id": guest_id, "name": name})
-        if ev["status"] == "active" and ev["turn_state"] == "idle" and not ev["rotation_paused"]:
-            self._advance(event_id)
-        return guest, token
+            "INSERT INTO guests(event_id, display_name, token_hash, rotation_pos, joined_at, debut_pending) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (event_id, name, hash_token(token), logic.next_rotation_pos(self._guests(event_id, active_only=False)),
+             self.clock(), int(singing_started)))
+        if singing_started:
+            self._place_next_in_line(ev, guest_id)
+            self.notice(event_id, f"🎉 New singer! {name} joins the line-up, right after the current singer.",
+                        "success")
+        self.emit(event_id, "guest_joined", {"guest_id": guest_id, "name": name, "new_singer": singing_started})
+        return self._guest(guest_id), token
 
     def guest_by_token(self, token: str) -> dict:
         g = self.db.one("SELECT * FROM guests WHERE token_hash = ?", (hash_token(token or ""),))
@@ -283,19 +310,11 @@ class Engine:
         g = self._guest(guest_id)
         if g["status"] != "active":
             return
-        event_id = g["event_id"]
         self.db.execute("UPDATE guests SET status = ? WHERE id = ?", (status, guest_id))
         self.db.execute("UPDATE queue_items SET status = 'removed' WHERE guest_id = ? AND status = 'queued'",
                         (guest_id,))
-        ev = self.get_event(event_id)
-        bonus = [b for b in ev["bonus_queue"] if b["guest_id"] != guest_id]
-        self._set(event_id, bonus_queue=bonus)
-        self.emit(event_id, "guest_left", {"guest_id": guest_id, "name": g["display_name"], "reason": status})
-        self.notice(event_id, text)
-        turn = self._turn(ev["current_turn_id"])
-        if turn and turn["guest_id"] == guest_id and turn["outcome"] is None:
-            self._close_turn(ev, status)
-            self._advance(event_id)
+        self.emit(g["event_id"], "guest_left", {"guest_id": guest_id, "name": g["display_name"], "reason": status})
+        self.notice(g["event_id"], text)
 
     def leave(self, guest_id: int) -> None:
         g = self._guest(guest_id)
@@ -305,247 +324,60 @@ class Engine:
         g = self._guest(guest_id)
         self._drop_guest(guest_id, "removed", f"{g['display_name']} was removed by the host.")
 
-    def skip_guest(self, guest_id: int) -> None:
+    def move_guest(self, guest_id: int, direction: int) -> None:
+        """Host: move a singer one place earlier (-1) or later (+1) in the singer order."""
         g = self._guest(guest_id)
-        ev = self.get_event(g["event_id"])
-        turn = self._turn(ev["current_turn_id"])
-        if turn and turn["guest_id"] == guest_id and turn["outcome"] is None:
-            self.skip_turn(ev["id"])
-        else:
-            self.db.execute("UPDATE guests SET skip_next = 1 WHERE id = ?", (guest_id,))
-            self.notice(ev["id"], f"{g['display_name']} will be skipped next time around.")
-            self.emit(ev["id"], "guest_updated", {"guest_id": guest_id})
+        order = self._guests(g["event_id"])
+        idx = next(i for i, x in enumerate(order) if x["id"] == guest_id)
+        j = idx + direction
+        if not 0 <= j < len(order):
+            return
+        other = order[j]
+        self.db.execute("UPDATE guests SET rotation_pos = ? WHERE id = ?", (other["rotation_pos"], guest_id))
+        self.db.execute("UPDATE guests SET rotation_pos = ? WHERE id = ?", (g["rotation_pos"], other["id"]))
+        self.emit(g["event_id"], "order_changed")
 
-    # ------------------------------------------------------------------ rotation
+    # ------------------------------------------------------------------ rounds and themes
 
-    def _close_turn(self, ev: dict, outcome: str) -> None:
-        turn = self._turn(ev["current_turn_id"])
-        if turn and turn["outcome"] is None:
-            self.db.execute("UPDATE turns SET outcome = ?, ended_at = ? WHERE id = ?",
-                            (outcome, self.clock(), turn["id"]))
-        self._set(ev["id"], current_turn_id=None, turn_state="idle", phase_deadline=None, paused_remaining=None)
-
-    def _start_round(self, event_id: int) -> dict:
+    def _start_round(self, event_id: int, number: int) -> dict:
+        """A round is one pass through the singer order. Each gets a theme spin (and maybe a Superset)."""
         ev = self.get_event(event_id)
-        number = ev["current_round"] + 1
         superset = logic.roll_superset(float(ev["config"]["superset_chance"]), ev["superset_pending"], self.rng)
-        theme = self._pick_theme(event_id) if superset else None
-        if superset and not theme:
+        theme = self._pick_theme(event_id)
+        if not theme:
             superset = False
         round_id = self.db.insert(
-            "INSERT INTO rounds(event_id, number, is_superset, superset_theme_id, started_at) VALUES (?, ?, ?, ?, ?)",
-            (event_id, number, int(superset), theme["id"] if theme else None, self.clock()))
+            "INSERT INTO rounds(event_id, number, is_superset, superset_theme_id, theme_id, theme_name, spun_at, "
+            "started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (event_id, number, int(superset), theme["id"] if superset else None, theme["id"] if theme else None,
+             theme["name"] if theme else None, self.clock(), self.clock()))
         self._set(event_id, current_round=number, current_round_id=round_id, superset_pending=None)
         self.emit(event_id, "round_changed", {"number": number, "is_superset": superset,
                                               "theme": self._theme_out(theme)})
-        if superset:
-            self.emit(event_id, "superset", {"active": True, "round": number, "theme": self._theme_out(theme)})
+        self._emit_spin(event_id, number, theme, superset)
         return self._round(round_id)
 
-    def _advance(self, event_id: int) -> None:
-        """Start the next turn.
-
-        Priority: a bonus re-pick (embed error), then a passed singer whose one-singer wait is
-        over, then the next guest in the fixed rotation.
-        """
+    def _emit_spin(self, event_id: int, number: int, theme: dict | None, superset: bool) -> None:
         ev = self.get_event(event_id)
-        if ev["status"] != "active" or ev["rotation_paused"]:
-            self._set(event_id, turn_state="idle", current_turn_id=None, phase_deadline=None)
-            return
-        guests = self._guests(event_id)
-        if not guests:
-            self._set(event_id, turn_state="idle", current_turn_id=None, phase_deadline=None)
-            return
-        active_ids = {g["id"] for g in guests}
-        pending = [b for b in ev["bonus_queue"] if b["guest_id"] in active_ids]
-        for b in pending:
-            # If the singer they let go first has left, the wait is over.
-            if b.get("kind") == "deferred" and b.get("after_guest_id") not in active_ids:
-                b["ready"] = True
-        entry = next((b for b in pending if b.get("kind") != "deferred" or b.get("ready")), None)
-        now = self.clock()
-        cfg = ev["config"]
-
-        if entry:
-            pending.remove(entry)
-            if ev["current_round_id"] is None:
-                self._start_round(event_id)
-                ev = self.get_event(event_id)
-            guest = next(g for g in guests if g["id"] == entry["guest_id"])
-            if entry.get("kind") == "deferred":
-                # Their regular turn, just moved one singer later. Rotation cursor stays put.
-                theme = self._turn_theme(event_id)
-                is_bonus = False
-            else:
-                theme = self._theme(entry.get("theme_id"))
-                is_bonus = True
-        else:
-            guest, wrapped, skipped = logic.next_in_rotation(guests, ev["cursor_pos"])
-            for gid in skipped:
-                self.db.execute("UPDATE guests SET skip_next = 0 WHERE id = ?", (gid,))
-                skipped_name = next(g["display_name"] for g in guests if g["id"] == gid)
-                self.notice(event_id, f"Skipping {skipped_name} this time around.")
-            if wrapped or ev["current_round_id"] is None:
-                self._start_round(event_id)
-            ev = self.get_event(event_id)
-            theme = self._turn_theme(event_id)
-            self._set(event_id, cursor_pos=guest["rotation_pos"])
-            is_bonus = False
-
-        for b in pending:
-            if b.get("kind") == "deferred" and b.get("after_guest_id") == guest["id"]:
-                b["ready"] = True
-        self._set(event_id, bonus_queue=pending)
-
-        turn_id = self.db.insert(
-            "INSERT INTO turns(event_id, round_id, guest_id, theme_id, theme_name, is_bonus, started_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (event_id, ev["current_round_id"], guest["id"], theme["id"] if theme else None,
-             theme["name"] if theme else None, int(is_bonus), now))
-        self._set(event_id, current_turn_id=turn_id, turn_state="announcing",
-                  phase_deadline=now + int(cfg["announce_seconds"]), paused_remaining=None)
-        self.emit(event_id, "turn_changed", {"guest_id": guest["id"], "name": guest["display_name"],
-                                             "is_bonus": is_bonus, "round": ev["current_round"]})
-        if is_bonus:
-            self.emit(event_id, "your_turn", {"bonus": True}, guest_id=guest["id"])
-        if int(cfg["announce_seconds"]) == 0:
-            self.tick(now)
-
-    def _turn_theme(self, event_id: int) -> dict | None:
-        ev = self.get_event(event_id)
-        rnd = self._round(ev["current_round_id"])
-        if rnd and rnd["is_superset"]:
-            return self._theme(rnd["superset_theme_id"])
-        return self._pick_theme(event_id)
-
-    def _next_singer_preview(self, ev: dict, exclude_id: int) -> dict | None:
-        """Who would pick next if ``exclude_id`` stepped aside right now."""
-        guests = [g for g in self._guests(ev["id"]) if g["id"] != exclude_id]
-        by_id = {g["id"]: g for g in guests}
-        for b in ev["bonus_queue"]:
-            if b["guest_id"] in by_id and (b.get("kind") != "deferred" or b.get("ready")):
-                return by_id[b["guest_id"]]
-        guest, _, _ = logic.next_in_rotation(guests, ev["cursor_pos"])
-        return guest
-
-    def pass_turn(self, guest_id: int) -> None:
-        """The singer lets the next person go first and picks right after them."""
-        guest = self._guest(guest_id)
-        ev = self.get_event(guest["event_id"])
-        turn = self._turn(ev["current_turn_id"])
-        if ev["status"] != "active" or not turn or turn["guest_id"] != guest_id or turn["outcome"] is not None:
-            raise EngineError("It isn't your turn right now.", 409)
-        after = self._next_singer_preview(ev, guest_id)
-        if not after:
-            raise EngineError("There's nobody else to go ahead of you. Pick a song when you're ready!", 409)
-        self._close_turn(ev, "passed")
-        pending = [b for b in ev["bonus_queue"] if b["guest_id"] != guest_id]
-        pending.append({"guest_id": guest_id, "kind": "deferred", "after_guest_id": after["id"], "ready": False})
-        self._set(ev["id"], bonus_queue=pending)
-        self.notice(ev["id"], f"{guest['display_name']} passed. {after['display_name']} goes first, "
-                              f"then {guest['display_name']} picks.")
-        self._advance(ev["id"])
-
-    def _needs_spin(self, ev: dict, turn: dict) -> bool:
-        if turn["is_bonus"]:
-            return False
-        rnd = self._round(turn["round_id"])
-        if rnd and rnd["is_superset"]:
-            first = self.db.one("SELECT MIN(id) AS first FROM turns WHERE round_id = ? AND is_bonus = 0",
-                                (rnd["id"],))
-            return first["first"] == turn["id"]
-        return True
-
-    def _enter_spin(self, ev: dict, turn: dict, now: float) -> None:
-        rnd = self._round(turn["round_id"])
-        superset = bool(rnd and rnd["is_superset"])
-        spin = int(ev["config"]["spin_seconds"]) + (2 if superset else 0)
-        self._set(ev["id"], turn_state="spinning", phase_deadline=now + spin)
-        themes = [self._theme_out(t) for t in self.db.all("SELECT * FROM themes WHERE enabled = 1 ORDER BY name")]
-        self.emit(ev["id"], "theme_spun", {
-            "guest_id": turn["guest_id"], "theme": self._theme_out(self._theme(turn["theme_id"])) or
-            ({"id": None, "name": turn["theme_name"], "description": ""} if turn["theme_name"] else None),
-            "superset": superset, "duration": spin, "candidates": [t["name"] for t in themes]})
-
-    def _enter_choosing(self, ev: dict, turn: dict, now: float) -> None:
-        self._set(ev["id"], turn_state="choosing", phase_deadline=now + int(ev["config"]["turn_seconds"]))
-        self.emit(ev["id"], "your_turn", {"bonus": bool(turn["is_bonus"])}, guest_id=turn["guest_id"])
-
-    def tick(self, now: float | None = None) -> bool:
-        """Advance any phases whose deadline has passed. Returns True if anything changed."""
-        now = self.clock() if now is None else now
-        changed = False
-        for row in self.db.all("SELECT id FROM events WHERE status = 'active' AND rotation_paused = 0 "
-                               "AND phase_deadline IS NOT NULL AND phase_deadline <= ?", (now,)):
-            ev = self.get_event(row["id"])
-            turn = self._turn(ev["current_turn_id"])
-            if not turn:
-                self._set(ev["id"], turn_state="idle", phase_deadline=None)
-                continue
-            changed = True
-            if ev["turn_state"] == "announcing":
-                if self._needs_spin(ev, turn):
-                    self._enter_spin(ev, turn, now)
-                else:
-                    self._enter_choosing(ev, turn, now)
-            elif ev["turn_state"] == "spinning":
-                self._enter_choosing(ev, turn, now)
-            elif ev["turn_state"] == "choosing":
-                # Time's up, but nobody loses their turn: they keep picking until they add a
-                # song or choose to pass. The host can still skip them.
-                guest = self._guest(turn["guest_id"])
-                self._set(ev["id"], turn_state="overtime", phase_deadline=None)
-                self.notice(ev["id"], f"{guest['display_name']}'s time is up, but they can still pick a song "
-                                      "or pass.", "warning")
-                self.emit(ev["id"], "turn_overtime", {"guest_id": guest["id"]}, guest_id=guest["id"])
-        return changed
-
-    def pause_rotation(self, event_id: int) -> None:
-        ev = self.get_event(event_id)
-        if ev["rotation_paused"]:
-            return
-        remaining = max(0.0, ev["phase_deadline"] - self.clock()) if ev["phase_deadline"] else None
-        self._set(event_id, rotation_paused=1, paused_remaining=remaining, phase_deadline=None)
-        self.notice(event_id, "The host paused the rotation.")
-        self.emit(event_id, "rotation_paused", {"paused": True})
-
-    def resume_rotation(self, event_id: int) -> None:
-        ev = self.get_event(event_id)
-        if not ev["rotation_paused"]:
-            return
-        deadline = self.clock() + ev["paused_remaining"] if ev["paused_remaining"] is not None else None
-        self._set(event_id, rotation_paused=0, paused_remaining=None, phase_deadline=deadline)
-        self.notice(event_id, "The rotation is back on.")
-        self.emit(event_id, "rotation_paused", {"paused": False})
-        ev = self.get_event(event_id)
-        if ev["status"] == "active" and (ev["turn_state"] == "idle" or not ev["current_turn_id"]):
-            self._advance(event_id)
-
-    def skip_turn(self, event_id: int) -> None:
-        ev = self.get_event(event_id)
-        turn = self._turn(ev["current_turn_id"])
-        if not turn:
-            raise EngineError("Nobody is up right now")
-        guest = self._guest(turn["guest_id"])
-        self._close_turn(ev, "skipped")
-        self.notice(event_id, f"The host skipped {guest['display_name']}'s turn.")
-        self._advance(event_id)
+        candidates = [t["name"] for t in self.db.all("SELECT name FROM themes WHERE enabled = 1 ORDER BY name")]
+        self.emit(event_id, "theme_spun", {"round": number, "theme": self._theme_out(theme), "superset": superset,
+                                           "duration": int(ev["config"]["spin_seconds"]) + (2 if superset else 0),
+                                           "candidates": candidates})
+        if superset:
+            self.emit(event_id, "superset", {"active": True, "round": number, "theme": self._theme_out(theme)})
 
     def force_spin(self, event_id: int) -> None:
         ev = self.get_event(event_id)
-        turn = self._turn(ev["current_turn_id"])
-        if not turn:
-            raise EngineError("Nobody is up right now, so there is nothing to spin")
-        rnd = self._round(turn["round_id"])
+        rnd = self._round(ev["current_round_id"])
+        if not rnd:
+            raise EngineError("Start the event first; the first round spins its theme then.")
         theme = self._pick_theme(event_id)
         if not theme:
             raise EngineError("Add or enable at least one theme first")
-        if rnd and rnd["is_superset"] and not turn["is_bonus"]:
-            self.db.execute("UPDATE rounds SET superset_theme_id = ? WHERE id = ?", (theme["id"], rnd["id"]))
-            self.emit(event_id, "superset", {"active": True, "round": rnd["number"], "theme": self._theme_out(theme)})
-        self.db.execute("UPDATE turns SET theme_id = ?, theme_name = ? WHERE id = ?",
-                        (theme["id"], theme["name"], turn["id"]))
-        self._enter_spin(ev, self._turn(turn["id"]), self.clock())
+        self.db.execute("UPDATE rounds SET theme_id = ?, theme_name = ?, spun_at = ?, "
+                        "superset_theme_id = CASE WHEN is_superset = 1 THEN ? ELSE superset_theme_id END WHERE id = ?",
+                        (theme["id"], theme["name"], self.clock(), theme["id"], rnd["id"]))
+        self._emit_spin(event_id, rnd["number"], theme, bool(rnd["is_superset"]))
 
     def force_superset(self, event_id: int) -> None:
         self.get_event(event_id)
@@ -561,7 +393,7 @@ class Engine:
             self.notice(event_id, "The upcoming Superset round was cancelled.")
         elif rnd and rnd["is_superset"]:
             self.db.execute("UPDATE rounds SET is_superset = 0 WHERE id = ?", (rnd["id"],))
-            self.notice(event_id, "The host ended the Superset. Themes spin per turn again.")
+            self.notice(event_id, "The host ended the Superset. The theme is just a suggestion again.")
         else:
             self._set(event_id, superset_pending="cancel")
             self.notice(event_id, "No Superset next round.")
@@ -569,69 +401,122 @@ class Engine:
 
     # ------------------------------------------------------------------ queue
 
+    def _queue(self, event_id: int) -> list[dict]:
+        ev = self.get_event(event_id)
+        return logic.play_order(self._items(event_id, ("queued",)), self._positions(event_id), ev["current_round"])
+
     def queue_song(self, guest_id: int, video: dict) -> dict:
+        """Singers add as many songs as they like; each lands in the next round they don't have a song in."""
         guest = self._guest(guest_id)
+        if guest["status"] != "active":
+            raise EngineError("You're not in this event any more.", 403)
         ev = self.get_event(guest["event_id"])
-        if ev["status"] != "active":
-            raise EngineError("The event isn't running right now")
-        turn = self._turn(ev["current_turn_id"])
-        if not turn or turn["guest_id"] != guest_id or ev["turn_state"] not in ("spinning", "choosing", "overtime"):
-            raise EngineError("It isn't your turn yet. Hang tight!", 409)
+        if ev["status"] == "ended":
+            raise EngineError("This event has ended", 410)
         if ev["config"]["prevent_duplicates"] and logic.is_duplicate(self._items(ev["id"]), video["video_id"]):
             raise EngineError("That song has already been sung or queued tonight. Pick another!", 409)
         max_d = int(ev["config"]["max_duration_s"])
         if max_d and video.get("duration_s") and video["duration_s"] > max_d:
             raise EngineError(f"That video is longer than the {max_d // 60}-minute limit")
-        rnd = self._round(turn["round_id"])
-        items = self._items(ev["id"], ("queued",))
+
+        mine = self.db.all("SELECT * FROM queue_items WHERE guest_id = ? AND status IN "
+                           "('queued', 'playing', 'played', 'skipped')", (guest_id,))
+        first_song = not mine and guest["debut_pending"]
+        if first_song and self._place_next_in_line(ev, guest_id):  # the line moved on since they joined
+            guest = self._guest(guest_id)
+        last_round = max((m["round_no"] or ev["current_round"] for m in mine), default=None)
+        round_no = logic.assign_round(ev["current_round"], self._anchor_pos(ev), guest["rotation_pos"], last_round)
+        priority = None
+        if guest["repick_credit"]:  # their last song couldn't play: this one goes straight to the front
+            queued = self._items(ev["id"], ("queued",))
+            priority = max((q["priority"] for q in queued if q["priority"] is not None), default=0) + 1
+            self.db.execute("UPDATE guests SET repick_credit = 0 WHERE id = ?", (guest_id,))
         item_id = self.db.insert(
-            "INSERT INTO queue_items(event_id, guest_id, turn_id, round_id, theme_name, is_superset, video_id, title, "
-            "channel, duration_s, thumbnail, position, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (ev["id"], guest_id, turn["id"], turn["round_id"], turn["theme_name"],
-             int(bool(rnd and rnd["is_superset"])), video["video_id"], video["title"][:200],
-             (video.get("channel") or "")[:120], video.get("duration_s"), video.get("thumbnail") or "",
-             logic.append_position(items), self.clock()))
+            "INSERT INTO queue_items(event_id, guest_id, round_no, priority, video_id, title, channel, duration_s, "
+            "thumbnail, position, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+            (ev["id"], guest_id, round_no, priority, video["video_id"], video["title"][:200],
+             (video.get("channel") or "")[:120], video.get("duration_s"), video.get("thumbnail") or "", self.clock()))
         self.emit(ev["id"], "song_queued", {"item_id": item_id, "guest_id": guest_id,
                                             "name": guest["display_name"], "title": video["title"]})
-        self._close_turn(ev, "queued")
-        if ev["config"]["autoplay"] and not ev["now_playing_item_id"]:
+        if first_song:
+            self.notice(ev["id"], f"New singer {guest['display_name']} is next in line!", "success")
+        if ev["status"] == "active" and ev["config"]["autoplay"] and not ev["now_playing_item_id"]:
             self.play_next(ev["id"])
-        self._advance(ev["id"])
         return self.db.one("SELECT * FROM queue_items WHERE id = ?", (item_id,))
 
-    def remove_item(self, event_id: int, item_id: int, by_guest_id: int | None = None) -> None:
+    def _my_item(self, event_id: int, item_id: int, guest_id: int | None) -> dict:
         item = self.db.one("SELECT * FROM queue_items WHERE id = ? AND event_id = ?", (item_id, event_id))
         if not item or item["status"] not in ACTIVE_QUEUE_STATUSES:
             raise EngineError("Song not found in the queue", 404)
-        if by_guest_id is not None and item["guest_id"] != by_guest_id:
-            raise EngineError("You can only remove your own songs", 403)
+        if guest_id is not None and item["guest_id"] != guest_id:
+            raise EngineError("You can only change your own songs", 403)
+        return item
+
+    def remove_item(self, event_id: int, item_id: int, by_guest_id: int | None = None) -> None:
+        item = self._my_item(event_id, item_id, by_guest_id)
         if item["status"] == "playing":
             self.skip_song(event_id)
             return
         self.db.execute("UPDATE queue_items SET status = 'removed' WHERE id = ?", (item_id,))
+        # Close the gap so the singer's later songs each move up a round.
+        self.db.execute("UPDATE queue_items SET round_no = round_no - 1 WHERE guest_id = ? AND status = 'queued' "
+                        "AND priority IS NULL AND round_no > ?", (item["guest_id"], item["round_no"] or 0))
         self.emit(event_id, "song_removed", {"item_id": item_id, "title": item["title"]})
 
-    def reorder(self, event_id: int, ordered_ids: list[int]) -> None:
-        current = [i["id"] for i in logic.play_order(self._items(event_id, ("queued",)))]
-        if sorted(current) != sorted(ordered_ids):
-            raise EngineError("The queue changed. Refresh and try again.", 409)
-        with self.db.transaction():
-            for pos, item_id in enumerate(ordered_ids, start=1):
-                self.db.execute("UPDATE queue_items SET position = ? WHERE id = ?", (float(pos), item_id))
+    def play_item_next(self, event_id: int, item_id: int) -> None:
+        """Host: put a song at the very front of the queue."""
+        item = self._my_item(event_id, item_id, None)
+        if item["status"] != "queued":
+            return
+        queued = self._items(event_id, ("queued",))
+        front = min((q["priority"] for q in queued if q["priority"] is not None), default=1.0) - 1
+        self.db.execute("UPDATE queue_items SET priority = ? WHERE id = ?", (front, item_id))
         self.emit(event_id, "queue_reordered")
 
-    def move_item(self, event_id: int, item_id: int, new_index: int) -> None:
-        current = [i["id"] for i in logic.play_order(self._items(event_id, ("queued",)))]
-        try:
-            self.reorder(event_id, logic.move_item(current, item_id, new_index))
-        except ValueError as exc:
-            raise EngineError(str(exc), 404) from exc
+    def move_my_song_up(self, guest_id: int, item_id: int) -> None:
+        """A singer swaps one of their songs with their own previous one."""
+        guest = self._guest(guest_id)
+        order = [i for i in self._queue(guest["event_id"]) if i["guest_id"] == guest_id]
+        idx = next((i for i, x in enumerate(order) if x["id"] == item_id), None)
+        if idx is None:
+            raise EngineError("Song not found in the queue", 404)
+        if idx == 0:
+            return
+        a, b = order[idx - 1], order[idx]
+        for src, dst in ((a, b), (b, a)):
+            self.db.execute("UPDATE queue_items SET round_no = ?, priority = ?, order_bias = ? WHERE id = ?",
+                            (src["round_no"], src["priority"], src["order_bias"], dst["id"]))
+        self.emit(guest["event_id"], "queue_reordered")
+
+    def let_next_go_first(self, guest_id: int, item_id: int) -> None:
+        """'Not ready? Let the next singer go first': exactly one song moves ahead of this one."""
+        guest = self._guest(guest_id)
+        event_id = guest["event_id"]
+        queue = self._queue(event_id)
+        if not queue or queue[0]["id"] != item_id or queue[0]["guest_id"] != guest_id:
+            raise EngineError("You can only do this when your song is up next.", 409)
+        if len(queue) < 2:
+            raise EngineError("There's nobody else in the queue to go ahead of you.", 409)
+        mine, nxt = queue[0], queue[1]
+        positions = self._positions(event_id)
+        if nxt["priority"] is not None:
+            self.db.execute("UPDATE queue_items SET priority = ? WHERE id = ?", (nxt["priority"] + 0.5, mine["id"]))
+        else:
+            new_round = nxt["round_no"] or self.get_event(event_id)["current_round"]
+            bias = positions[nxt["guest_id"]] + float(nxt["order_bias"] or 0) - positions[guest_id] + 0.5
+            if new_round > (mine["round_no"] or 0):  # keep this singer's own songs in their order
+                self.db.execute("UPDATE queue_items SET round_no = round_no + 1 WHERE guest_id = ? AND id != ? "
+                                "AND status = 'queued' AND priority IS NULL AND round_no >= ?",
+                                (guest_id, mine["id"], new_round))
+            self.db.execute("UPDATE queue_items SET priority = NULL, round_no = ?, order_bias = ? WHERE id = ?",
+                            (new_round, bias, mine["id"]))
+        nxt_name = self._guest(nxt["guest_id"])["display_name"]
+        self.notice(event_id, f"{guest['display_name']} let {nxt_name} go first.")
+        self.emit(event_id, "queue_reordered")
 
     def flag_item(self, event_id: int, item_id: int, flagged_by: str) -> int:
-        item = self.db.one("SELECT * FROM queue_items WHERE id = ? AND event_id = ?", (item_id, event_id))
-        if not item or item["status"] not in ACTIVE_QUEUE_STATUSES:
-            raise EngineError("Song not found in the queue", 404)
-        if not item["is_superset"]:
+        item = self._my_item(event_id, item_id, None)
+        if not self._in_superset(self.get_event(event_id), item):
             raise EngineError("Songs can only be flagged during a Superset round")
         if flagged_by == f"guest:{item['guest_id']}":
             raise EngineError("You can't flag your own song")
@@ -641,6 +526,13 @@ class Engine:
         self.emit(event_id, "song_flagged", {"item_id": item_id, "count": count, "title": item["title"]})
         return count
 
+    def _in_superset(self, ev: dict, item: dict) -> bool:
+        """A song is in the Superset if it plays (or is playing) in the current Superset round."""
+        rnd = self._round(ev["current_round_id"])
+        if not rnd or not rnd["is_superset"]:
+            return False
+        return item["status"] == "playing" or (item["round_no"] or ev["current_round"]) == ev["current_round"]
+
     # ------------------------------------------------------------------ playback
 
     def play_next(self, event_id: int) -> dict | None:
@@ -648,19 +540,28 @@ class Engine:
         if ev["now_playing_item_id"]:
             self.db.execute("UPDATE queue_items SET status = 'played', played_at = ? WHERE id = ? AND status = 'playing'",
                             (self.clock(), ev["now_playing_item_id"]))
-        nxt = logic.play_order(self._items(event_id, ("queued",)))
-        if not nxt:
+        nxt = self._queue(event_id)
+        if not nxt or ev["status"] != "active":
             self._set(event_id, now_playing_item_id=None)
             self.emit(event_id, "now_playing", {"item": None})
             return None
         item = nxt[0]
-        self.db.execute("UPDATE queue_items SET status = 'playing', played_at = ? WHERE id = ?",
-                        (self.clock(), item["id"]))
+        if item["priority"] is None and (item["round_no"] or 0) > ev["current_round"]:
+            self._start_round(event_id, item["round_no"])
+            ev = self.get_event(event_id)
+        rnd = self._round(ev["current_round_id"])
+        self.db.execute("UPDATE queue_items SET status = 'playing', played_at = ?, round_id = ?, theme_name = ?, "
+                        "is_superset = ?, round_no = COALESCE(round_no, ?) WHERE id = ?",
+                        (self.clock(), rnd["id"] if rnd else None, rnd["theme_name"] if rnd else None,
+                         int(bool(rnd and rnd["is_superset"])), ev["current_round"], item["id"]))
         self._set(event_id, now_playing_item_id=item["id"])
         guest = self._guest(item["guest_id"])
         self.emit(event_id, "now_playing", {"item_id": item["id"], "video_id": item["video_id"],
                                             "title": item["title"], "guest_id": guest["id"],
                                             "name": guest["display_name"]})
+        if guest["debut_pending"]:
+            self.db.execute("UPDATE guests SET debut_pending = 0 WHERE id = ?", (guest["id"],))
+            self.emit(event_id, "new_singer", {"guest_id": guest["id"], "name": guest["display_name"]})
         self.emit(event_id, "you_are_singing", {"title": item["title"]}, guest_id=guest["id"])
         if len(nxt) > 1:
             self.emit(event_id, "you_are_next", {"title": nxt[1]["title"]}, guest_id=nxt[1]["guest_id"])
@@ -685,11 +586,11 @@ class Engine:
     def stop_playback(self, event_id: int) -> None:
         ev = self.get_event(event_id)
         if ev["now_playing_item_id"]:
-            # Put the current song back at the top of the queue.
-            items = logic.play_order(self._items(event_id, ("queued",)))
-            top = (items[0]["position"] - 1.0) if items else 1.0
-            self.db.execute("UPDATE queue_items SET status = 'queued', position = ?, played_at = NULL WHERE id = ?",
-                            (top, ev["now_playing_item_id"]))
+            # Put the current song back at the front of the queue.
+            queued = self._items(event_id, ("queued",))
+            front = min((q["priority"] for q in queued if q["priority"] is not None), default=1.0) - 1
+            self.db.execute("UPDATE queue_items SET status = 'queued', priority = ?, played_at = NULL WHERE id = ?",
+                            (front, ev["now_playing_item_id"]))
             self._set(event_id, now_playing_item_id=None)
             self.emit(event_id, "now_playing", {"item": None})
 
@@ -702,17 +603,13 @@ class Engine:
         self._set(event_id, now_playing_item_id=None)
         guest = self._guest(item["guest_id"])
         reason = "can't be played outside YouTube" if code in (101, 150) else "couldn't be played"
-        follow_up = f", and {guest['display_name']} gets to pick again" if guest["status"] == "active" else ""
+        active = guest["status"] == "active"
+        follow_up = f". {guest['display_name']}'s next pick plays straight away" if active else ""
         self.notice(event_id, f"“{item['title']}” {reason}. Skipping it{follow_up}.", "warning")
-        if guest["status"] == "active":
-            turn = self._turn(item["turn_id"])
-            bonus = ev["bonus_queue"] + [{"guest_id": guest["id"], "theme_id": turn["theme_id"] if turn else None}]
-            self._set(event_id, bonus_queue=bonus)
+        if active:
+            self.db.execute("UPDATE guests SET repick_credit = 1 WHERE id = ?", (guest["id"],))
             self.emit(event_id, "song_error", {"item_id": item_id, "code": code, "title": item["title"]},
                       guest_id=guest["id"])
-            ev = self.get_event(event_id)
-            if ev["status"] == "active" and ev["turn_state"] == "idle" and not ev["rotation_paused"]:
-                self._advance(event_id)
         self.play_next(event_id)
 
     # ------------------------------------------------------------------ views
@@ -723,7 +620,6 @@ class Engine:
         guests_all = self._guests(event_id, active_only=False)
         names = {g["id"]: g["display_name"] for g in guests_all}
         active = [g for g in guests_all if g["status"] == "active"]
-        turn = self._turn(ev["current_turn_id"])
         rnd = self._round(ev["current_round_id"])
         flag_counts = {r["queue_item_id"]: r["n"] for r in self.db.all(
             "SELECT f.queue_item_id, COUNT(*) AS n FROM flags f JOIN queue_items q ON q.id = f.queue_item_id "
@@ -733,52 +629,40 @@ class Engine:
             return {"id": i["id"], "video_id": i["video_id"], "title": i["title"], "channel": i["channel"],
                     "duration_s": i["duration_s"], "thumbnail": i["thumbnail"], "guest_id": i["guest_id"],
                     "guest_name": names.get(i["guest_id"], "?"), "theme": i["theme_name"],
-                    "is_superset": bool(i["is_superset"]), "flags": flag_counts.get(i["id"], 0),
-                    "status": i["status"]}
+                    "round": i["round_no"], "priority": i["priority"] is not None,
+                    "is_superset": self._in_superset(ev, i) if i["status"] in ACTIVE_QUEUE_STATUSES
+                    else bool(i["is_superset"]),
+                    "flags": flag_counts.get(i["id"], 0), "status": i["status"]}
 
-        queue = [item_out(i) for i in logic.play_order(self._items(event_id, ("queued",)))]
+        queue = [item_out(i) for i in self._queue(event_id)]
         playing = self.db.one("SELECT * FROM queue_items WHERE id = ?", (ev["now_playing_item_id"],)) \
             if ev["now_playing_item_id"] else None
         recent = [item_out(i) for i in self.db.all(
             "SELECT * FROM queue_items WHERE event_id = ? AND status = 'played' ORDER BY played_at DESC LIMIT 10",
             (event_id,))]
-        history = [{"round_id": t["round_id"], "guest_name": names.get(t["guest_id"], "?"),
-                    "theme": t["theme_name"], "outcome": t["outcome"], "is_bonus": bool(t["is_bonus"])}
-                   for t in self.db.all("SELECT * FROM turns WHERE event_id = ? ORDER BY id DESC LIMIT 12",
+        history = [{"number": r["number"], "theme": r["theme_name"], "is_superset": bool(r["is_superset"])}
+                   for r in self.db.all("SELECT * FROM rounds WHERE event_id = ? ORDER BY id DESC LIMIT 12",
                                         (event_id,))]
-        superset_theme = self._theme_out(self._theme(rnd["superset_theme_id"])) if rnd and rnd["is_superset"] else None
-        deadline = ev["phase_deadline"]
-        turn_out = None
-        if turn:
-            theme = self._theme(turn["theme_id"])
-            hide_theme = ev["turn_state"] == "announcing" and self._needs_spin(ev, turn)
-            turn_out = {
-                "id": turn["id"], "guest_id": turn["guest_id"], "guest_name": names.get(turn["guest_id"], "?"),
-                "is_bonus": bool(turn["is_bonus"]), "state": ev["turn_state"],
-                "theme": None if hide_theme else (self._theme_out(theme) or (
-                    {"id": None, "name": turn["theme_name"], "description": ""} if turn["theme_name"] else None)),
-                "deadline": deadline, "remaining": max(0.0, deadline - now) if deadline else ev["paused_remaining"],
-            }
-        upcoming = logic.upcoming_order(active, ev["cursor_pos"], exclude_id=turn["guest_id"] if turn else None,
-                                        pending=ev["bonus_queue"])
+        counts: dict[int, int] = {}
+        for q in queue:
+            counts[q["guest_id"]] = counts.get(q["guest_id"], 0) + 1
+        theme = self._theme(rnd["theme_id"]) if rnd else None
         return {
             "server_time": now,
             "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"], "status": ev["status"],
-                      "config": ev["config"], "rotation_paused": bool(ev["rotation_paused"]),
-                      "superset_pending": ev["superset_pending"]},
+                      "config": ev["config"], "superset_pending": ev["superset_pending"]},
             "round": {"number": ev["current_round"], "is_superset": bool(rnd and rnd["is_superset"]),
-                      "theme": superset_theme},
-            "turn": turn_out,
+                      "theme": self._theme_out(theme) or ({"id": None, "name": rnd["theme_name"], "description": ""}
+                                                          if rnd and rnd["theme_name"] else None),
+                      "spun_at": rnd["spun_at"] if rnd else None,
+                      "spin_seconds": int(ev["config"]["spin_seconds"]) + (2 if rnd and rnd["is_superset"] else 0)},
             "guests": [{"id": g["id"], "name": g["display_name"], "rotation_pos": g["rotation_pos"],
-                        "skip_next": bool(g["skip_next"])} for g in active],
-            "upcoming": upcoming,
-            "bonus_queue": [b["guest_id"] for b in ev["bonus_queue"]],
-            "passed": [{"guest_id": b["guest_id"], "after_guest_id": b.get("after_guest_id"), "ready": b.get("ready")}
-                       for b in ev["bonus_queue"] if b.get("kind") == "deferred"],
+                        "new_singer": bool(g["debut_pending"]), "queued": counts.get(g["id"], 0)}
+                       for g in active],
             "queue": queue,
             "now_playing": item_out(playing) if playing else None,
             "recent": recent,
-            "theme_history": history,
+            "rounds": history,
             "appearance": self.appearance(),
         }
 
@@ -795,7 +679,7 @@ class Engine:
     def history_csv(self, event_id: int) -> str:
         ev = self.get_event(event_id)
         rows = self.db.all(
-            "SELECT q.*, g.display_name, r.number AS round_number FROM queue_items q "
+            "SELECT q.*, g.display_name, COALESCE(r.number, q.round_no) AS round_number FROM queue_items q "
             "JOIN guests g ON g.id = q.guest_id LEFT JOIN rounds r ON r.id = q.round_id "
             "WHERE q.event_id = ? AND q.status IN ('played', 'playing', 'skipped', 'error') "
             "ORDER BY COALESCE(q.played_at, q.added_at)", (event_id,))
