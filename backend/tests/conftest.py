@@ -3,11 +3,15 @@ import sys
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db import Database  # noqa: E402
+from app.config import Settings  # noqa: E402
 from app.engine import Engine  # noqa: E402
+from app.main import create_app  # noqa: E402
+from app.youtube import YouTubeService  # noqa: E402
 
 
 class FakeClock:
@@ -83,3 +87,37 @@ def make_event(engine):
         engine.drain()
         return ev["id"], guests
     return _make
+
+
+class StubYouTube(YouTubeService):
+    def __init__(self, db):
+        super().__init__(db, api_key="SECRET-KEY-DO-NOT-LEAK", enable_ytdlp=False)
+        self.searches = 0
+
+    async def search(self, raw_query, safe_search="moderate"):
+        self.searches += 1
+        return {"query": raw_query + " karaoke", "source": "api", "cached": False,
+                "results": [{"video_id": "abcdefghijk", "title": "Test Song", "channel": "Ch",
+                             "duration_s": 180, "thumbnail": "", "embeddable": True}]}
+
+    async def verify(self, video_id):
+        if video_id == "blockedvid0":
+            return {"video_id": video_id, "embeddable": False}
+        return {"video_id": video_id, "title": "Test Song", "channel": "Ch", "duration_s": 180,
+                "embeddable": True, "thumbnail": ""}
+
+
+@pytest.fixture
+def client(tmp_path):
+    settings = Settings(data_path=tmp_path, host_pin="4321", static_dir=tmp_path / "static",
+                        youtube_api_key="SECRET-KEY-DO-NOT-LEAK")
+    holder = {}
+
+    def make():
+        from app.db import Database
+        return StubYouTube(Database(tmp_path / "karoulette.db"))
+
+    app = create_app(settings, start_ticker=False, youtube=make())
+    with TestClient(app) as c:
+        holder["app"] = app
+        yield c

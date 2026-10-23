@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.0] - 2026-10-23
+### Added
+- **Crowd meter and crowd favourite**: every reaction counts towards the song playing. A 🔥 meter beside the song on the TV fills up as the cheers come in, and the recap crowns the **crowd favourite** (most-cheered song) and the **most cheered singer**. The CSV history has a cheers column.
+- **Need ideas?** Themes carry search ideas (Host admin → Themes; the starter themes come with some, e.g. 80s: Bon Jovi, Whitney Houston, a-ha…). Phones show them as buttons under the round's theme and on Superset turns; tapping one searches for it. "Songs like ⟨song⟩" Supersets suggest that song's artist and title.
+- **Last call**: an optional closing time per event (Host admin → Events). The TV shows the closing time and roughly how many more songs fit; songs that would run past it are refused, guests can't call a Superset any more (the host still can), and everyone is told "Last call!" once.
+- **Backups tab** in Host admin: make and download a backup, restore one from the list (including the automatic pre-upgrade ones) or from a file, and delete old ones. A restore saves the current database first and needs no restart.
+- **Health check** for Uptime Kuma and Docker: `/api/health` now checks the database (503 if it can't answer) and reports the version, active events, live connections and uptime. README has the Uptime Kuma set-up.
+- **Load test** (`python -m scripts.loadtest`): 30 phones join, queue and cheer at once. It runs in CI and fails if requests or live updates get slow.
+
+### Changed
+- **Faster with a full room**: the server now sends one live update per burst of changes instead of one per change. With 30 phones queuing at once, adding a song went from 914 ms to 325 ms (95th percentile) and each phone received 6 updates instead of 92. Updates are sent as compact JSON, and new database indexes help the queue.
+- **Lighter phones**: the TV, remote and admin pages load only when opened, and React sits in its own long-cached file, so a guest's phone downloads about 11 % less on first visit and only about 36 KB of app code after an upgrade (was 347 KB).
+- The engine is split into one module per area (events, guests, themes, queue, playback, Supersets, last call, views); behaviour is unchanged.
+- Browser tests give each test phone its own address, as on real Wi-Fi.
+
 ## [0.7.0] - 2026-10-22
 ### Added
 - **"Get ready" screen** before every song: the TV shows the singer, the song and a countdown so they can reach the mic. Set the length per event in Host admin → Events (default 5 seconds, 0 turns it off); **Start now** (or <kbd>G</kbd>) skips it.

@@ -86,7 +86,18 @@ function JoinForm({ initialCode, onJoined }) {
   );
 }
 
-function SearchPanel({ canAdd, limitNote, onAdd, push, setPick, partners }) {
+/** "Need ideas?" chips: tapping one searches for it. */
+function IdeaChips({ ideas, onPick }) {
+  if (!ideas?.length) return null;
+  return (
+    <div className="ideas">
+      <span className="label">Need ideas? Tap one to search</span>
+      {ideas.map((idea) => <button key={idea} className="idea-chip" onClick={() => onPick(idea)}>{idea}</button>)}
+    </div>
+  );
+}
+
+function SearchPanel({ canAdd, limitNote, onAdd, push, setPick, partners, suggest, panelRef }) {
   const [q, setQ] = useState("");
   const [duet, setDuet] = useState("");
   const [results, setResults] = useState(null);
@@ -94,13 +105,13 @@ function SearchPanel({ canAdd, limitNote, onAdd, push, setPick, partners }) {
   const [adding, setAdding] = useState(null);
   const [note, setNote] = useState("");
 
-  const search = async (e) => {
-    e.preventDefault();
-    if (!q.trim()) return;
+  const search = async (e, query = q) => {
+    e?.preventDefault();
+    if (!query.trim()) return;
     setBusy(true);
     setNote("");
     try {
-      const res = await api(`/api/guest/search?q=${encodeURIComponent(q.trim())}`, { guest: true });
+      const res = await api(`/api/guest/search?q=${encodeURIComponent(query.trim())}`, { guest: true });
       setResults(res.results);
       if (res.warning) setNote(res.warning);
       else if (res.source === "ytdlp") setNote("Using backup search. Durations may be missing.");
@@ -110,6 +121,13 @@ function SearchPanel({ canAdd, limitNote, onAdd, push, setPick, partners }) {
       setBusy(false);
     }
   };
+
+  useEffect(() => { // an idea chip was tapped: search for it
+    if (!suggest) return;
+    setQ(suggest.q);
+    search(null, suggest.q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggest]);
 
   const add = async (r) => {
     setAdding(r.video_id);
@@ -126,7 +144,7 @@ function SearchPanel({ canAdd, limitNote, onAdd, push, setPick, partners }) {
   };
 
   return (
-    <section className="card">
+    <section className="card" ref={panelRef}>
       <form className="search" onSubmit={search} role="search">
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} maxLength={100}
                placeholder="Song or artist" enterKeyHint="search" />
@@ -227,6 +245,12 @@ function GuestHome({ me, onLeave }) {
   const { canInstall, install, iosHint } = useInstall();
   const prevIdx = useRef(null);
   const [choosing, setChoosing] = useState(false);
+  const [suggest, setSuggest] = useState(null);
+  const searchRef = useRef(null);
+  const pickIdea = (q) => {
+    setSuggest({ q, at: Date.now() });
+    searchRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   const myId = me.guest.id;
 
   useEffect(() => { api("/api/public/themes").then(setThemes).catch(() => {}); }, []);
@@ -349,6 +373,8 @@ function GuestHome({ me, onLeave }) {
   const gettingReady = singingNow && readyLeft > 0;
   const cap = Number(ev.config.max_songs_per_singer) || 0;
   const atCap = cap > 0 && mySongs.length >= cap;
+  const lc = state.last_call;
+  const pastLastCall = !!lc && !lc.open;
   const wait = (idx) => formatWait(secondsUntil(state, idx, now));
 
   let headline;
@@ -407,6 +433,7 @@ function GuestHome({ me, onLeave }) {
                 songAction("/api/guest/superset/pass")}>Sit this one out</button>
             </div>
           )}
+          {mySlot?.status === "pending" && <IdeaChips ideas={sup.ideas} onPick={pickIdea} />}
           <SupersetLineup superset={sup} myId={myId} onFlag={flag} />
         </section>
       )}
@@ -440,6 +467,7 @@ function GuestHome({ me, onLeave }) {
                     <div className="theme-pill">{round.theme.name}</div>
                     {round.theme.description && <div className="muted small">{round.theme.description}</div>}
                     <div className="muted small">Just a suggestion: sing what you like!</div>
+                    <IdeaChips ideas={round.theme.ideas} onPick={pickIdea} />
                   </>
                 )}
               </div>
@@ -450,10 +478,13 @@ function GuestHome({ me, onLeave }) {
             <section className="card"><Recap recap={state.recap} eventName={ev.name} me={me.guest.name} size="phone" /></section>
           )}
 
-          {ev.status !== "ended" && <SearchPanel canAdd={!atCap} onAdd={addSong} push={push}
+          {ev.status !== "ended" && <SearchPanel canAdd={!atCap && !pastLastCall} onAdd={addSong} push={push}
+                                                 suggest={suggest} panelRef={searchRef}
                                                  setPick={mySlot?.status === "pending" ? sup.theme : null}
                                                  partners={partners}
-                                                 limitNote={atCap ? `You have ${mySongs.length} songs waiting, the most the host allows. Add another once one has played.` : ""} />}
+                                                 limitNote={pastLastCall ? `🔔 Last call has passed: the queue already runs to closing time (${lc.closing_text}).`
+                                                   : atCap ? `You have ${mySongs.length} songs waiting, the most the host allows. Add another once one has played.`
+                                                     : lc && lc.room <= 3 ? `🔔 Closing at ${lc.closing_text}: room for about ${lc.room} more song${lc.room === 1 ? "" : "s"}. Get yours in!` : ""} />}
 
           {mySongs.length > 0 && (
             <section className="card">

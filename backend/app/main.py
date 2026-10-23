@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import io
 import logging
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import auth
+from .backups import BackupError, Backups
 from .config import Settings
 from .db import Database
 from .engine import REACTIONS, Engine, EngineError
@@ -87,6 +89,7 @@ class ThemeIn(BaseModel):
     description: str | None = Field(default="", max_length=280)
     weight: float | None = Field(default=1, ge=0, le=100)
     enabled: bool = True
+    ideas: str | None = Field(default="", max_length=400)
 
 
 class UpgradeIn(BaseModel):
@@ -105,6 +108,7 @@ EVENT_ACTIONS: dict[str, str] = {
     "stop-playback": "stop_playback", "start-now": "start_now", "pause-queue": "pause_queue",
     "resume-queue": "resume_queue",
 }
+MAX_UPLOAD_BYTES = 200_000_000
 VIDEO_ACTIONS: dict[str, str] = {"video-toggle": "toggle", "volume-up": "volume_up", "volume-down": "volume_down"}
 STATIC_FILES: dict[str, str | None] = {  # files served from the site root, with their media type
     "favicon.svg": None, "robots.txt": None, "manifest.webmanifest": "application/manifest+json",
@@ -126,6 +130,8 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     auth.init_pin(db, settings.host_pin)
     yt = youtube or YouTubeService(db, settings.youtube_api_key, settings.youtube_daily_quota, settings.enable_ytdlp)
     upd = updates or UpdateService(db, settings.version, settings.source_repo, settings.upgrade_dir)
+    backups = Backups(db, settings.data_path, settings.version)
+    started_at = time.time()
     hub = Hub()
     lock = asyncio.Lock()
     limits = {
@@ -134,18 +140,30 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         "react": RateLimiter(20, 10),
     }
 
+    pending_state: dict[int, asyncio.Task] = {}
+    state_locks: dict[int, asyncio.Lock] = {}
+
     async def broadcast(messages: list[dict], extra_events: set[int] = frozenset()) -> None:
+        """Send typed messages now; the full state follows shortly, once per burst of changes."""
         event_ids = {m["event_id"] for m in messages} | set(extra_events)
         for m in messages:
             await hub.send(m["event_id"], m["message"], m["guest_id"])
         for eid in event_ids:
-            if hub.count(eid):
-                async with lock:
-                    try:
-                        snap = engine.snapshot(eid)
-                    except EngineError:
-                        continue
-                await hub.send(eid, {"type": "state", "data": snap})
+            if hub.count(eid) and eid not in pending_state:
+                pending_state[eid] = asyncio.create_task(send_state(eid))
+
+    async def send_state(eid: int) -> None:
+        # Thirty phones queuing at once would otherwise mean thirty full snapshots to thirty phones.
+        # Wait a moment to gather the burst; one lock per event keeps snapshots in order.
+        await asyncio.sleep(settings.state_coalesce_s)
+        async with state_locks.setdefault(eid, asyncio.Lock()):
+            pending_state.pop(eid, None)  # changes from here on schedule a fresh snapshot
+            async with lock:
+                try:
+                    snap = engine.snapshot(eid)
+                except EngineError:
+                    return
+            await hub.send(eid, {"type": "state", "data": snap})
 
     async def run(fn: Callable, *args, event_id: int | None = None):
         async with lock:
@@ -181,6 +199,8 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         yield
         if task:
             task.cancel()
+        for pending in list(pending_state.values()):
+            pending.cancel()
         await yt.aclose()
         await upd.aclose()
         db.close()
@@ -234,7 +254,16 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
 
     @app.get("/api/health")
     async def health():
-        return {"status": "ok", "version": settings.version}
+        """For Docker's health check and monitors like Uptime Kuma: 200 + "ok" only if the database answers."""
+        try:
+            db.one("SELECT 1 AS ok")
+            active = db.one("SELECT COUNT(*) AS n FROM events WHERE status = 'active'")["n"]
+        except Exception as exc:  # noqa: BLE001  (any database failure means unhealthy)
+            log.error("Health check: database error: %s", exc)
+            return JSONResponse({"status": "error", "version": settings.version, "database": "error"},
+                                status_code=503)
+        return {"status": "ok", "version": settings.version, "database": "ok", "active_events": active,
+                "connections": sum(len(c) for c in hub.rooms.values()), "uptime_s": int(time.time() - started_at)}
 
     @app.get("/api/public/events/{code}")
     async def public_event(code: str):
@@ -359,9 +388,12 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         if body.emoji not in REACTIONS:
             raise HTTPException(422, "Pick one of the reaction buttons.")
         limit("react", f"g{guest['id']}")
-        # Only the TV needs these: they float up the screen and are never stored.
-        await hub.send_screens(guest["event_id"], {"type": "reaction",
-                                                   "data": {"emoji": body.emoji, "name": guest["display_name"]}})
+        # Each cheer counts towards the song playing (the crowd meter and "Crowd favourite"); only the TV
+        # and remote are sent the reaction itself, and no full state update follows.
+        counted = await run(engine.cheer, guest["id"])
+        await hub.send_screens(guest["event_id"], {"type": "reaction", "data": {
+            "emoji": body.emoji, "name": guest["display_name"],
+            "item_id": counted[0] if counted else None, "cheers": counted[1] if counted else 0}})
         return {"ok": True}
 
     @app.post("/api/guest/queue/{item_id}/let-next-go-first")
@@ -538,6 +570,59 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     @app.get("/api/host/quota", dependencies=host)
     async def quota():
         return yt.quota_status()
+
+    # ------------------------------------------------------------------ host: backups
+
+    def backup_call(fn, *args):
+        try:
+            return fn(*args)
+        except BackupError as exc:
+            raise HTTPException(exc.status, exc.message) from exc
+
+    @app.get("/api/host/backups", dependencies=host)
+    async def list_backups():
+        return {"folder": str(backups.dir), "backups": backups.list()}
+
+    @app.post("/api/host/backups", dependencies=host)
+    async def create_backup():
+        return backup_call(backups.create, "manual")
+
+    @app.get("/api/host/backups/{name}", dependencies=host)
+    async def download_backup(name: str):
+        return FileResponse(backup_call(backups.path, name), media_type="application/vnd.sqlite3", filename=name)
+
+    @app.delete("/api/host/backups/{name}", dependencies=host)
+    async def delete_backup(name: str):
+        backup_call(backups.delete, name)
+        return {"ok": True}
+
+    async def after_restore(result: dict) -> dict:
+        engine.seed_themes()
+        engine.upgrade_event_configs()
+        auth.init_pin(db, settings.host_pin)  # a PIN set in .env still works after restoring
+        await broadcast([], set(hub.rooms))
+        log.info("Restored %s (saved the previous database as %s)", result["restored"], result["safety_backup"])
+        return result
+
+    @app.post("/api/host/backups/{name}/restore", dependencies=host)
+    async def restore_backup(name: str):
+        async with lock:
+            result = backup_call(backups.restore, name)
+        return await after_restore(result)
+
+    @app.post("/api/host/backups-upload", dependencies=host)
+    async def upload_backup(request: Request):
+        """Restore from a .db file sent as the raw request body (no multipart needed)."""
+        chunks, size = [], 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                raise HTTPException(413, f"That file is over {MAX_UPLOAD_BYTES // 1_000_000} MB.")
+            chunks.append(chunk)
+        name = backup_call(backups.save_upload, chunks)
+        async with lock:
+            result = backup_call(backups.restore, name)
+        return await after_restore(result)
 
     @app.get("/api/host/updates", dependencies=host)
     async def updates_status():

@@ -70,6 +70,7 @@ export default function HostScreen() {
   const [playerState, setPlayerState] = useState(-1);
   const [reactions, setReactions] = useState([]);
   const [bouched, setBouched] = useState(null);
+  const [cheers, setCheers] = useState({ itemId: null, count: 0 });
   const [showRemote, setShowRemote] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const { toasts, push } = useToasts();
@@ -93,7 +94,7 @@ export default function HostScreen() {
     switch (msg.type) {
       case "notice":
         // Bouches, smoke breaks and Supersets get the whole screen, so skip their toasts here.
-        if (!msg.for_guest_id && !["bouched", "paused", "superset"].includes(d.kind)) push(d.text, d.level);
+        if (!msg.for_guest_id && !["bouched", "paused", "superset", "last_call"].includes(d.kind)) push(d.text, d.level);
         break;
       case "bouched":
         setBouched(d.name);
@@ -125,6 +126,7 @@ export default function HostScreen() {
         const r = { id, emoji: d.emoji, name: d.name, left: 8 + Math.random() * 84, drift: Math.random() * 60 - 30 };
         setReactions((list) => [...list.slice(-39), r]);
         setTimeout(() => setReactions((list) => list.filter((x) => x.id !== id)), 3600);
+        if (d.item_id) setCheers((c) => ({ itemId: d.item_id, count: Math.max(d.cheers, c.itemId === d.item_id ? c.count : 0) }));
         break;
       }
       case "video_command":
@@ -259,6 +261,13 @@ export default function HostScreen() {
         <div className="tv-round">
           {state.round.number > 0 && <span>Round {state.round.number}</span>}
           {superset && <span className="superset-tag">SUPERSET · {setSpinning ? "spinning…" : sup.theme}</span>}
+          {state.last_call && (
+            <span className={`last-call-tag ${state.last_call.open ? "" : "closed"}`}>
+              🔔 {state.last_call.open
+                ? `Closing ${state.last_call.closing_text} · room for about ${state.last_call.room} more song${state.last_call.room === 1 ? "" : "s"}`
+                : `Last call! The queue runs to ${state.last_call.closing_text}`}
+            </span>
+          )}
           {!connected && <span className="error-tag">Reconnecting…</span>}
         </div>
       </header>
@@ -358,6 +367,16 @@ export default function HostScreen() {
               <div className="now-name">{singers(nowPlaying)}</div>
               <div className="now-title">{decodeEntities(nowPlaying.title)}</div>
               {nowPlaying.is_superset && nowPlaying.flags > 0 && <span className="flag-badge">⚑ {nowPlaying.flags}</span>}
+              {(() => {
+                const count = cheers.itemId === nowPlaying.id ? Math.max(cheers.count, nowPlaying.cheers) : nowPlaying.cheers;
+                const full = Math.max(10, state.guests.length * 3); // the meter fills at ~3 cheers a guest
+                return count > 0 && (
+                  <span className="crowd-meter" title="Crowd meter: cheers from phones">
+                    <span className="crowd-bar"><span style={{ width: `${Math.min(100, (count / full) * 100)}%` }} /></span>
+                    🔥 {count}
+                  </span>
+                );
+              })()}
             </div>
           )}
         </section>

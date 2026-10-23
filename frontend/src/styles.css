@@ -471,3 +471,14 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
   .table td[data-label]::before { content: attr(data-label); flex: 0 0 6.5em; color: var(--muted); font-size: 0.8em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
   .table td.actions { justify-content: flex-start; padding-top: 0.5em; }
 }
+
+/* ---------- crowd meter, last call, ideas */
+.crowd-meter { margin-left: auto; display: inline-flex; align-items: center; gap: 0.5em; font-weight: 900; color: var(--orange); font-size: 1.2em; }
+.crowd-bar { width: 7em; height: 0.6em; border-radius: 999px; background: var(--input); overflow: hidden; border: 1px solid var(--line); }
+.crowd-bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--highlight), var(--orange), var(--red)); transition: width 0.4s ease; }
+.last-call-tag { border: 2px solid var(--accent-2); color: var(--accent-2); padding: 0.1em 0.7em; border-radius: 999px; font-size: 0.8em; }
+.last-call-tag.closed { border-color: var(--orange); color: var(--orange); animation: glow 1.6s infinite; }
+.ideas { display: flex; flex-wrap: wrap; gap: 0.4em; justify-content: center; margin: 0.5em 0; }
+.ideas .label { width: 100%; }
+.idea-chip { border: 1px solid var(--line); background: var(--card-2); color: var(--text); border-radius: 999px; padding: 0.35em 0.8em; font: inherit; font-size: 0.85em; font-weight: 700; cursor: pointer; min-height: 36px; }
+.idea-chip:hover { background: var(--hover); }

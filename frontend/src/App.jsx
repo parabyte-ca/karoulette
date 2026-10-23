@@ -1,10 +1,16 @@
+import { lazy, Suspense } from "react";
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 import HostGate from "./pages/HostGate";
-import EventPicker from "./pages/EventPicker";
-import HostScreen from "./pages/HostScreen";
-import HostRemote from "./pages/HostRemote";
-import HostAdmin from "./pages/HostAdmin";
 import JoinApp from "./pages/JoinApp";
+
+// Guests' phones only need the landing and join pages; the host pages load when first opened.
+const EventPicker = lazy(() => import("./pages/EventPicker"));
+const HostScreen = lazy(() => import("./pages/HostScreen"));
+const HostRemote = lazy(() => import("./pages/HostRemote"));
+const HostAdmin = lazy(() => import("./pages/HostAdmin"));
+
+const loading = <main className="center-page"><p className="muted">Loading…</p></main>;
+const host = (page) => <HostGate><Suspense fallback={loading}>{page}</Suspense></HostGate>;
 
 function Landing() {
   return (
@@ -25,10 +31,10 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/join" element={<JoinApp />} />
       <Route path="/join/:code" element={<JoinApp />} />
-      <Route path="/host" element={<HostGate><EventPicker /></HostGate>} />
-      <Route path="/host/admin" element={<HostGate><HostAdmin /></HostGate>} />
-      <Route path="/host/event/:eventId" element={<HostGate><HostScreen /></HostGate>} />
-      <Route path="/host/remote/:eventId" element={<HostGate><HostRemote /></HostGate>} />
+      <Route path="/host" element={host(<EventPicker />)} />
+      <Route path="/host/admin" element={host(<HostAdmin />)} />
+      <Route path="/host/event/:eventId" element={host(<HostScreen />)} />
+      <Route path="/host/remote/:eventId" element={host(<HostRemote />)} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

@@ -7,6 +7,7 @@ from __future__ import annotations
 import random
 import re
 import unicodedata
+from datetime import datetime, timedelta
 from typing import Iterable, Sequence
 
 DEFAULT_EVENT_CONFIG: dict = {
@@ -21,6 +22,7 @@ DEFAULT_EVENT_CONFIG: dict = {
     "ready_seconds": 5,          # "Get ready" countdown on the TV before each song; 0 turns it off
     "max_songs_per_singer": 0,   # songs a singer may have waiting at once; 0 = no limit
     "superset_vote_seconds": 60, # how long a guest-called Superset vote stays open
+    "last_call": "",             # "HH:MM" closing time; songs that would run past it are refused
 }
 
 CONFIG_LIMITS: dict = {
@@ -51,6 +53,11 @@ def merge_config(base: dict, overrides: dict | None) -> dict:
             if value not in ("none", "moderate", "strict"):
                 raise ValueError("safe_search must be none, moderate or strict")
             cfg[key] = value
+        elif key == "last_call":
+            value = str(value).strip()
+            if value and not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", value):
+                raise ValueError("Last call must be a time like 23:30, or blank")
+            cfg[key] = value.zfill(5) if value else ""
     return cfg
 
 
@@ -156,6 +163,39 @@ def song_name(title: str) -> str:
                   flags=re.IGNORECASE)
     name = re.sub(r"\s*[-|–]\s*(karaoke|instrumental|lyrics).*$", "", name, flags=re.IGNORECASE).strip()
     return name or title.strip()
+
+
+# --------------------------------------------------------------------------- last call
+
+def closing_at(start: float, hhmm: str) -> float | None:
+    """The first local HH:MM after ``start`` (so 01:30 for a night that started at 19:00 is the next day)."""
+    if not hhmm:
+        return None
+    hour, minute = (int(x) for x in hhmm.split(":"))
+    base = datetime.fromtimestamp(start).astimezone()
+    close = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if close <= base:
+        close += timedelta(days=1)
+    return close.timestamp()
+
+
+def clock_text(epoch: float) -> str:
+    """11:30 p.m., the Canadian way."""
+    t = datetime.fromtimestamp(epoch).astimezone()
+    return f"{t.hour % 12 or 12}:{t.minute:02d} {'a.m.' if t.hour < 12 else 'p.m.'}"
+
+
+def split_ideas(text: str | list | None) -> list[str]:
+    """'Bon Jovi, a-ha,, Journey' -> ['Bon Jovi', 'a-ha', 'Journey'] (at most 8, each up to 40 characters)."""
+    items = text if isinstance(text, list) else (text or "").split(",")
+    clean = [clean_name(str(i))[:40] for i in items]
+    return list(dict.fromkeys(i for i in clean if i))[:8]
+
+
+def song_parts(title: str) -> list[str]:
+    """Search ideas from a karaoke title: 'Toto - Africa (Karaoke)' gives ['Toto', 'Africa']."""
+    parts = [p.strip() for p in re.split(r"\s+[-–|]\s+", song_name(title)) if p.strip()]
+    return list(dict.fromkeys(parts))[:3]
 
 
 # --------------------------------------------------------------------------- misc

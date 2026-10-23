@@ -4,7 +4,7 @@ import pytest
 from app.engine import EngineError
 
 from .conftest import add, play_all, video
-from .test_api import client, login  # noqa: F401  (fixture)
+from .test_api import login
 
 
 # ---------------------------------------------------------------- get ready
@@ -144,7 +144,7 @@ def test_recap_after_the_event(engine, make_event):
 # ---------------------------------------------------------------- API
 
 
-def test_feature_endpoints(client):  # noqa: F811
+def test_feature_endpoints(client):
     login(client)
     ev = client.post("/api/host/events", json={"name": "Remote night"}).json()
     code, eid = ev["join_code"], ev["id"]
@@ -273,7 +273,7 @@ def test_smoke_break_holds_the_queue(engine, make_event):
     assert not snap["event"]["paused"] and snap["now_playing"]["id"] == first
 
 
-def test_vote_and_break_endpoints(client):  # noqa: F811
+def test_vote_and_break_endpoints(client):
     login(client)
     ev = client.post("/api/host/events", json={"name": "Vote night"}).json()
     tokens = {n: client.post("/api/guest/join", json={"code": ev["join_code"], "name": n}).json()["token"]
@@ -298,3 +298,67 @@ def test_vote_and_break_endpoints(client):  # noqa: F811
     assert state["event"]["paused"] and state["now_playing"] is None
     assert client.post(f"/api/host/events/{ev['id']}/actions/resume-queue").status_code == 200
     assert client.get("/api/guest/state", headers=h["Alex"]).json()["now_playing"] is not None
+
+
+# ---------------------------------------------------------------- v0.8.0: cheers, ideas, last call
+
+
+def test_cheers_count_for_the_song_playing_and_crown_a_favourite(engine, make_event):
+    eid, (alex, blake, casey) = make_event()
+    add(engine, alex)
+    add(engine, blake)
+    assert engine.cheer(casey["id"]) is None              # nothing playing yet
+    engine.play_next(eid)
+    for _ in range(3):
+        item_id, count = engine.cheer(blake["id"])
+    assert count == 3 and engine.snapshot(eid)["now_playing"]["cheers"] == 3
+    engine.player_ended(eid, item_id)
+    engine.cheer(alex["id"])                              # Blake's song gets one
+    engine.end_event(eid)
+    recap = engine.snapshot(eid)["recap"]
+    assert recap["crowd_favourite"]["singer"] == "Alex" and recap["crowd_favourite"]["cheers"] == 3
+    assert recap["most_cheered"] == {"singer": "Alex", "cheers": 3}
+    assert ",cheers," in engine.history_csv(eid).splitlines()[0]
+
+
+def test_themes_carry_search_ideas(engine, make_event):
+    eighties = next(t for t in engine.list_themes() if t["name"] == "80s")
+    assert "Bon Jovi" in eighties["ideas"]
+    saved = engine.save_theme({"name": "Disco", "ideas": "ABBA, Bee Gees,, Donna Summer, ABBA"})
+    assert saved["ideas"] == ["ABBA", "Bee Gees", "Donna Summer"]
+    eid, (alex, *_) = make_event()
+    add(engine, alex)
+    engine.play_next(eid)
+    engine.force_superset(eid, "now")                     # "Songs like <song>": ideas come from the title
+    sup = engine.snapshot(eid)["superset"]
+    assert sup["ideas"] and sup["ideas"][0] in sup["inspired_by"]
+
+
+def test_last_call_refuses_songs_past_closing_time(engine, make_event, clock):
+    import time as _time
+    eid, (alex, blake, _) = make_event(ready_seconds=0)
+    engine.db.execute("UPDATE events SET started_at = ? WHERE id = ?", (clock.now, eid))
+    in_15 = _time.strftime("%H:%M", _time.localtime(clock.now + 15 * 60 + 59))
+    engine.update_event(eid, None, {"last_call": in_15})  # room for about three 200-second songs
+    info = engine.snapshot(eid)["last_call"]
+    assert info["open"] and info["room"] >= 3 and info["closing_text"].endswith(("a.m.", "p.m."))
+    for _ in range(4):
+        add(engine, alex)
+    with pytest.raises(EngineError) as err:
+        add(engine, blake)
+    assert err.value.status == 409 and "Last call" in err.value.message
+    notices = [m["message"]["data"].get("text", "") for m in engine.drain() if m["message"]["type"] == "notice"]
+    assert sum("Last call!" in t for t in notices) == 1   # announced once
+    assert not engine.snapshot(eid)["last_call"]["open"]
+    with pytest.raises(EngineError):
+        engine.call_superset_vote(blake["id"], "after")   # no Supersets after last call…
+    engine.force_superset(eid, "after")                   # …unless the host squeezes one in
+    engine.update_event(eid, None, {"last_call": ""})
+    assert engine.snapshot(eid)["last_call"] is None
+    add(engine, blake)
+
+
+def test_last_call_setting_is_validated(engine):
+    with pytest.raises(EngineError):
+        engine.create_event("Bad", {"last_call": "25:99"})
+    assert engine.create_event("Ok", {"last_call": "1:30"})["config"]["last_call"] == "01:30"
