@@ -1,7 +1,9 @@
 import { decodeEntities } from "../lib/format";
+import { useBanner } from "../lib/schemes";
 
 /** End-of-night summary: big stat tiles plus the night's highlights. `me` adds a personal line on phones. */
 export default function Recap({ recap, eventName, me = null, size = "tv" }) {
+  const { banner } = useBanner();
   if (!recap) return null;
   const tiles = [
     [recap.songs, recap.songs === 1 ? "song sung" : "songs sung"],
@@ -26,8 +28,10 @@ export default function Recap({ recap, eventName, me = null, size = "tv" }) {
 
   return (
     <div className={`recap recap-${size}`}>
-      <div className="label">That's a wrap</div>
-      <h2 className="recap-title">{eventName}</h2>
+      <div className={banner ? "recap-banner" : undefined}>
+        <div className="label">That's a wrap</div>
+        <h2 className="recap-title">{eventName}</h2>
+      </div>
       {mine !== null && (
         <p className="recap-me">{mine ? `You sang ${mine} song${mine === 1 ? "" : "s"} tonight. Bravo! 🎤` : "Thanks for cheering everyone on! 👏"}</p>
       )}

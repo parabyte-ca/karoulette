@@ -62,7 +62,7 @@
 
 ## 5. API surface (abridged)
 
-Public: `GET /api/public/event/{code}` (name, status), `GET /api/health`.
+Public: `GET /api/public/event/{code}` (name, status), `GET /api/health`, `GET /api/public/appearance` (scheme and banner URLs), `GET /api/public/banner` (the uploaded banner). Host: `PUT /api/host/appearance`, `PUT|DELETE /api/host/appearance/banner` (raw image body, sniffed as JPEG/PNG/WebP, 8 MB cap, stored in `<data>/banner/`), `PUT /api/host/appearance/banner-all`. Since v0.9.0 the server fills Open Graph tags into `index.html` for `/`, `/join` and `/join/{code}` so shared join links show the event name and banner.
 Guest (Bearer token): `POST /api/guest/join` → token, `POST /leave`, `GET /state`, `GET /search?q=` (rate-limited 10/min/guest + 60/min/IP), `POST /queue` (only when it is your turn), `POST /flag/{item}`.
 Host (PIN → signed session cookie, HttpOnly): `POST /api/host/login`, events CRUD + start/end, `POST /turn/{start|pause|resume|skip}`, `POST /theme/spin`, `POST /superset/{force|cancel}`, queue `reorder|remove`, guest `remove|skip`, `POST /player/{ended|error|playing}`, themes CRUD, settings, quota, `GET /events/{id}/history.csv`.
 

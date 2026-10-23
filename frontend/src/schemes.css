@@ -317,6 +317,56 @@
   color-scheme: dark;
 }
 
+/* ---------------------------------------------------------------- 7. Main Stage */
+[data-scheme="stage"] {
+  --bg: #070a1a;
+  --bg-2: #0d1230;
+  --card: rgba(14, 19, 46, 0.9);
+  --card-2: #1a2150;
+  --line: #2f3a78;
+  --text: #fff6ea;
+  --muted: #b9c0dc;
+  --accent: #ff3b3b;
+  --accent-hover: #ff5e5e;
+  --on-accent: #1c0000;
+  --accent-2: #4da3ff;
+  --highlight: #ffb547;
+  --on-highlight: #241400;
+  --green: #4fe0a0;
+  --red: #ff6b6b;
+  --orange: #ff9b3d;
+  --hover: #232c66;
+  --input: #050816;
+  --danger-bg: #5a1a1f;
+  --danger-text: #ffdada;
+  --chrome: rgba(4, 6, 18, 0.6);
+  --chrome-strong: rgba(4, 6, 18, 0.82);
+  --glow-1: rgba(255, 59, 59, 0.55);
+  --glow-1-soft: rgba(255, 59, 59, 0.25);
+  --glow-2: rgba(77, 163, 255, 0.4);
+  --glow-hl: rgba(255, 181, 71, 0.6);
+  --highlight-wash: rgba(255, 181, 71, 0.09);
+  --spinner-bg: linear-gradient(180deg, #050816, #1a2150 50%, #050816);
+  --stage-bg:
+    conic-gradient(from 160deg at 18% -5%, rgba(0, 0, 0, 0) 0deg, rgba(255, 59, 59, 0.28) 10deg, rgba(0, 0, 0, 0) 22deg),
+    conic-gradient(from 175deg at 50% -5%, rgba(0, 0, 0, 0) 0deg, rgba(255, 181, 71, 0.26) 8deg, rgba(0, 0, 0, 0) 18deg),
+    conic-gradient(from 190deg at 82% -5%, rgba(0, 0, 0, 0) 0deg, rgba(77, 163, 255, 0.28) 10deg, rgba(0, 0, 0, 0) 22deg),
+    radial-gradient(ellipse 90% 35% at 50% 100%, rgba(150, 160, 200, 0.18), rgba(0, 0, 0, 0) 70%),
+    linear-gradient(180deg, #0d1230 0%, #070a1a 85%);
+  --bg-image:
+    radial-gradient(ellipse 45% 40% at 12% 0%, rgba(255, 59, 59, 0.14), rgba(0, 0, 0, 0) 70%),
+    radial-gradient(ellipse 40% 35% at 50% 0%, rgba(255, 181, 71, 0.1), rgba(0, 0, 0, 0) 70%),
+    radial-gradient(ellipse 45% 40% at 88% 0%, rgba(77, 163, 255, 0.14), rgba(0, 0, 0, 0) 70%),
+    radial-gradient(ellipse 80% 30% at 50% 100%, rgba(150, 160, 200, 0.08), rgba(0, 0, 0, 0) 70%);
+  --font-body: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  --font-display: "Anton", "Bebas Neue", "Impact", "Arial Narrow", sans-serif;
+  --display-tracking: 0.03em;
+  --display-case: uppercase;
+  --radius: 10px;
+  --shadow: 0 0 0 1px rgba(255, 181, 71, 0.08), 0 14px 34px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
 /* Flecks of light from the mirror ball sweep slowly round the room behind the TV. */
 [data-scheme="disco"] .tv::before {
   content: "";
@@ -386,3 +436,118 @@
 
 /* Velvet Lounge: champagne underline beneath headings. */
 [data-scheme="velvet"] .card h2 { border-bottom: 1px solid var(--line); padding-bottom: 0.3em; }
+
+/* Main Stage: poster lettering, red-to-amber like the lights, and a slow haze drifting over the TV. */
+[data-scheme="stage"] .brand {
+  font-weight: 400;
+  background: linear-gradient(90deg, #ff6a5a 0%, #ffc56b 55%, #7cc0ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+[data-scheme="stage"] .brand span { color: transparent; }
+[data-scheme="stage"] .brand .version-tag, [data-scheme="stage"] .brand .muted { -webkit-text-fill-color: var(--muted); }
+[data-scheme="stage"] h1, [data-scheme="stage"] h2, [data-scheme="stage"] .smoke-word,
+[data-scheme="stage"] .superset-word, [data-scheme="stage"] .recap-title { font-weight: 400; }
+[data-scheme="stage"] .tv::before {
+  content: "";
+  position: fixed;
+  inset: auto -20% -10% -20%;
+  height: 45%;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 30% 50% at 25% 60%, rgba(190, 200, 235, 0.07), transparent 70%),
+    radial-gradient(ellipse 35% 45% at 70% 50%, rgba(190, 200, 235, 0.06), transparent 70%);
+  filter: blur(18px);
+  animation: haze 24s ease-in-out infinite alternate;
+}
+@keyframes haze { from { transform: translateX(-5%); } to { transform: translateX(5%); } }
+[data-scheme="stage"] .tv > * { position: relative; z-index: 1; }
+
+/* ---------------------------------------------------------------- Banner photo
+ * Main Stage's band photo, or the host's own upload (Host admin → Appearance). Shown on any skin
+ * when "Show the banner with every skin" is on; data-banner on <html> says one is set. */
+[data-banner] .tv-top {
+  min-height: 6.4em;
+  padding: 0.9em 1.4em;
+  background:
+    linear-gradient(90deg, rgba(4, 6, 18, 0.92) 0%, rgba(4, 6, 18, 0.6) 35%, rgba(4, 6, 18, 0.1) 70%, rgba(4, 6, 18, 0.5) 100%),
+    var(--banner) center 41% / cover no-repeat,
+    var(--bg);
+  border-bottom: 2px solid var(--highlight);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+}
+[data-banner] .tv-top .brand.tiny { font-size: 1.6em; }
+[data-banner] .tv-event { font-size: 1.8em; }
+/* Marquee bulbs along the bottom edge of the Main Stage banner. */
+[data-scheme="stage"][data-banner] .tv-top::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -5px;
+  height: 8px;
+  background: radial-gradient(circle, #ffe2a8 0 2.5px, rgba(255, 181, 71, 0.5) 3.5px, transparent 4.5px) 0 0 / 22px 8px repeat-x;
+  filter: drop-shadow(0 0 4px rgba(255, 181, 71, 0.9));
+  animation: bulbs 1.2s steps(2) infinite;
+}
+@keyframes bulbs { 50% { background-position: 11px 0; } }
+
+/* The photo behind the TV's idle screens (the QR code, smoke breaks, get ready), darkened so text stays readable. */
+[data-banner] .idle-overlay {
+  background:
+    radial-gradient(ellipse 70% 70% at 50% 50%, rgba(4, 6, 18, 0.35), rgba(4, 6, 18, 0.8)),
+    linear-gradient(180deg, rgba(4, 6, 18, 0.45), rgba(4, 6, 18, 0.85)),
+    var(--banner) center 35% / cover no-repeat,
+    var(--bg);
+}
+[data-banner] .smoke-break {
+  background:
+    radial-gradient(ellipse 60% 50% at 50% 60%, rgba(200, 205, 225, 0.12), rgba(0, 0, 0, 0) 70%),
+    linear-gradient(180deg, rgba(4, 6, 18, 0.6), rgba(4, 6, 18, 0.9)),
+    var(--banner) center 35% / cover no-repeat,
+    var(--bg);
+}
+/* The recap carries the photo in its own header instead. */
+[data-banner] .recap-overlay { background: var(--stage-bg); }
+.recap-banner {
+  position: relative;
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 1em;
+  padding: 2.2em 1em 1em;
+  background:
+    linear-gradient(180deg, rgba(4, 6, 18, 0.15) 0%, rgba(4, 6, 18, 0.85) 100%),
+    var(--banner) center 35% / cover no-repeat;
+  box-shadow: var(--shadow);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
+}
+.recap-banner .recap-title { margin-bottom: 0; }
+.recap-phone .recap-banner {
+  margin: -1rem -1rem 1rem;
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding-top: 4.5em;
+  background:
+    linear-gradient(180deg, rgba(4, 6, 18, 0.15) 0%, rgba(4, 6, 18, 0.85) 100%),
+    var(--banner-small) center 35% / cover no-repeat;
+}
+
+/* Phones: a hero on the join page and a strip behind the header once you're in. */
+.join-hero {
+  margin: -1rem -1rem 1rem;
+  aspect-ratio: 16 / 7;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background:
+    linear-gradient(180deg, rgba(4, 6, 18, 0) 55%, var(--card) 100%),
+    var(--banner-small) center 35% / cover no-repeat;
+}
+[data-banner] .phone-top {
+  margin: -0.8rem -0.8rem 0.8rem;
+  padding: 1.8rem 1rem 0.8rem;
+  background:
+    linear-gradient(180deg, rgba(4, 6, 18, 0.35), rgba(4, 6, 18, 0.9)),
+    var(--banner-small) center 30% / cover no-repeat;
+  border-bottom: 2px solid var(--highlight);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
+}

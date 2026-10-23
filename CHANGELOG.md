@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.0] - 2026-10-23
+### Added
+- **Main Stage** colour scheme: a summer festival headliner. A band photo runs across the top of the TV like a marquee (with chasing bulbs), in midnight stage blue, smoke red and amber spotlights, with bold concert-poster lettering and a slow stage haze.
+- **Banner photo** (Host admin → Appearance): Main Stage comes with a band photo, or upload your own (JPEG, PNG or WebP, up to 8 MB) and optionally show it with every skin. The banner appears:
+  - across the top of the TV, and behind its QR, smoke break and get-ready screens (darkened so text stays readable);
+  - at the top of the end-of-night recap on the TV and phones;
+  - as the picture on the join page and behind the header on guests' phones;
+  - in the **link preview** when the join link is shared (WhatsApp, Messages, Slack…), with the title "Join ⟨event⟩ on Karoulette".
+
 ## [0.8.0] - 2026-10-23
 ### Added
 - **Crowd meter and crowd favourite**: every reaction counts towards the song playing. A 🔥 meter beside the song on the TV fills up as the cheers come in, and the recap crowns the **crowd favourite** (most-cheered song) and the **most cheered singer**. The CSV history has a cheers column.

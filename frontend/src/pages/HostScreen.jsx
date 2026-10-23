@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, hostApi } from "../lib/api";
-import { applyScheme } from "../lib/schemes";
+import { applyAppearance } from "../lib/schemes";
 import { useCountdown, useEventSocket } from "../lib/useEventSocket";
 import { decodeEntities, formatDuration } from "../lib/format";
 import YouTubePlayer from "../components/YouTubePlayer";
@@ -142,7 +142,7 @@ export default function HostScreen() {
   }, [push]);
 
   const { state, connected, serverNow } = useEventSocket(checked ? code : null, { onMessage });
-  useEffect(() => { if (state?.appearance) applyScheme(state.appearance.scheme); }, [state?.appearance?.scheme]);
+  useEffect(() => { applyAppearance(state?.appearance); }, [state?.appearance]);
 
   const act = useCallback(async (action, confirmText) => {
     if (confirmText && !window.confirm(confirmText)) return;

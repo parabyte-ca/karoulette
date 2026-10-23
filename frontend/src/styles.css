@@ -482,3 +482,11 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 .ideas .label { width: 100%; }
 .idea-chip { border: 1px solid var(--line); background: var(--card-2); color: var(--text); border-radius: 999px; padding: 0.35em 0.8em; font: inherit; font-size: 0.85em; font-weight: 700; cursor: pointer; min-height: 36px; }
 .idea-chip:hover { background: var(--hover); }
+
+/* ---------- Appearance: banner photo */
+.mock-top.mock-marquee { background: linear-gradient(90deg, rgba(4, 6, 18, 0.9), rgba(4, 6, 18, 0.25)), var(--mock-banner) center 41% / cover no-repeat; padding: 1em; border-bottom: 2px solid var(--highlight); text-shadow: 0 1px 4px #000; }
+.banner-settings { margin-top: 1.6em; border-top: 1px solid var(--line); padding-top: 1em; }
+.banner-row { display: flex; gap: 1.2em; align-items: flex-start; flex-wrap: wrap; }
+.banner-preview { width: min(100%, 420px); aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--line); }
+.banner-actions { display: flex; flex-direction: column; gap: 0.6em; align-items: flex-start; flex: 1; min-width: 220px; }
+.banner-actions p { margin: 0; }

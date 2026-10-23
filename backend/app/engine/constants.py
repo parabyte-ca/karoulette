@@ -26,7 +26,10 @@ SEED_IDEAS = {
     "One-Hit Wonders": "Come On Eileen, Tainted Love, Ice Ice Baby, Who Let the Dogs Out, Macarena",
 }
 ACTIVE_QUEUE_STATUSES = ("queued", "playing")
-COLOUR_SCHEMES = ("neon", "onair", "synthwave", "velvet", "aurora", "disco")
+COLOUR_SCHEMES = ("neon", "onair", "synthwave", "velvet", "aurora", "disco", "stage")
+# Main Stage's built-in banner (a big one for the TV, a small one for phones, a 1200x630 link-preview crop).
+STAGE_BANNER = {"banner": "/banners/main-stage.jpg", "banner_small": "/banners/main-stage-800.jpg",
+                "og_image": "/banners/main-stage-og.jpg"}
 DEFAULT_SCHEME = "neon"
 REACTIONS = ("👏", "🔥", "😂", "❤️", "🎉", "🤘")
 VIDEO_COMMANDS = ("toggle", "volume_up", "volume_down")

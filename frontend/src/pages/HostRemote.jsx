@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, hostApi } from "../lib/api";
-import { applyScheme } from "../lib/schemes";
+import { applyAppearance } from "../lib/schemes";
 import { useCountdown, useEventSocket } from "../lib/useEventSocket";
 import { decodeEntities, formatDuration } from "../lib/format";
 import { singers } from "../lib/eta";
@@ -24,7 +24,7 @@ export default function HostRemote() {
     if (msg.type === "notice" && !msg.for_guest_id) push(msg.data.text, msg.data.level);
   }, [push]);
   const { state, connected, serverNow } = useEventSocket(code, { onMessage });
-  useEffect(() => { if (state?.appearance) applyScheme(state.appearance.scheme); }, [state?.appearance?.scheme]);
+  useEffect(() => { applyAppearance(state?.appearance); }, [state?.appearance]);
   const readyLeft = useCountdown(state?.now_playing?.starts_at || null, serverNow, 0);
 
   const act = async (action, confirmText) => {
