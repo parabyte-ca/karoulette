@@ -34,7 +34,7 @@ def main() -> None:
     engine = Engine(db, rng=random.Random(7))
     engine.seed_themes()
     ev = engine.create_event(os.getenv("DEMO_EVENT_NAME", "Demo Night"),
-                             {"superset_chance": 0.15, "turn_seconds": 90})
+                             {"themes_enabled": True, "superset_chance": 0.15})
     tokens = {}
     for name in DEMO_GUESTS:
         guest, token = engine.join(ev["id"], name)

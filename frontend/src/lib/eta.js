@@ -9,6 +9,10 @@ export function secondsUntil(state, index, now) {
   let total = 0;
   const playing = state.now_playing;
   if (playing) total += Math.max(0, (playing.starts_at || now) + length(playing) - now);
+  // A Superset under way plays all its turns before the queue carries on.
+  for (const slot of state.superset?.slots || []) {
+    if (slot.status === "pending" || slot.status === "picked") total += ready + length(slot);
+  }
   for (let i = 0; i < index; i += 1) total += ready + length(state.queue[i]);
   return total;
 }

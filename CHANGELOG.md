@@ -11,16 +11,23 @@
 - **End-of-night recap** on the TV and phones: songs, singers, minutes, duets, most songs, top themes, Superset stars, first and last songs, and each guest's own count.
 - **Rejoin code** for switching phones: keeps your name, place and songs, and signs the old phone out. Hosts can see every code in Host admin.
 - **Install as an app**: web app manifest, icons and a service worker, plus an "Install Karoulette" button on phones (HTTPS needed).
-- **Guest-called Supersets**: any singer can call a Superset for the round in progress; everyone else votes on their phones (60 seconds by default, set per event) and the majority wins. The TV shows the vote live. One call per singer per round; the host can still force or cancel.
+- **Supersets are now a bonus set**: everyone picks one extra song that fits, sung once round the singer order (carrying on from the rotation), and then the regular queue carries on exactly where it left off.
+  - **Any singer can call one**: everyone else votes on their phones (60 seconds by default, set per event) and the majority wins. The TV shows the vote live. One call per singer per round.
+  - The caller (or the host) chooses **Start now**, where the song playing kicks it off and the theme becomes "Songs like ⟨that song⟩", or **After this song**, which spins a theme.
+  - The set waits for each singer to pick when it's their turn; singers can sit it out and the host can skip a turn. A singer's Superset song is a bonus outside the song limit.
+  - The host can declare or cancel one any time from the TV or remote.
 - **Bouche!**: the singer "Remove" button in Host admin is now **Bouche!**, and the TV announces "[singer] has been BOUCHED!".
 - **Smoke break!**: **Pause queue** on the TV or remote stops the song (it goes back to the front) and holds the queue; the TV shows "Smoke break!" and phones say the music's on hold until **Resume**. Shortcut <kbd>P</kbd>.
 - **Mirror Ball** colour scheme: a 70s disco with a mirror ball, light rays and flecks of pink, ice blue and gold sweeping the room.
 - **Browser tests** (Playwright) for the TV, phones and remote, run in CI on every pull request.
 
 ### Changed
+- **Themes are optional**: a per-event switch, off by default, so singers pick freely. Events created before this version keep their themes. Supersets still spin (or borrow) a theme.
+- The random Superset chance per round now defaults to 0 % (set it per event in Host admin).
+- Admin pages fit phone screens: the Themes table becomes one card per theme, and buttons wrap instead of running off the side.
 - **New singers no longer jump the line**: anyone joining after singing has started goes to the end of the singer order, so their first song plays at the end of the current round. They're still announced with the "NEW SINGER!" banner.
 - At most three pop-up messages show at once, so they don't bury the phone screen.
-- Database columns and tables for the countdown, duets, rejoin codes, Superset votes and smoke breaks are added automatically on upgrade.
+- Database columns and tables for the countdown, duets, rejoin codes, Superset votes and sets, and smoke breaks are added automatically on upgrade.
 - The "Avoid themes" setting now says rounds instead of turns.
 
 ## [0.6.0] - 2026-10-22

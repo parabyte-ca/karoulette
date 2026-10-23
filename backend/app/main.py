@@ -51,6 +51,10 @@ class VoteIn(BaseModel):
     yes: bool
 
 
+class CallIn(BaseModel):
+    mode: str = Field(default="after", pattern=r"^(now|after)$")
+
+
 class ReactionIn(BaseModel):
     emoji: str = Field(min_length=1, max_length=8)
 
@@ -96,8 +100,8 @@ class PlayerIn(BaseModel):
 
 
 EVENT_ACTIONS: dict[str, str] = {
-    "start": "start_event", "end": "end_event", "spin": "force_spin", "superset-force": "force_superset",
-    "superset-cancel": "cancel_superset", "play-next": "play_next", "skip-song": "skip_song",
+    "start": "start_event", "end": "end_event", "spin": "force_spin", "superset-cancel": "cancel_superset",
+    "superset-skip-turn": "skip_superset_turn", "play-next": "play_next", "skip-song": "skip_song",
     "stop-playback": "stop_playback", "start-now": "start_now", "pause-queue": "pause_queue",
     "resume-queue": "resume_queue",
 }
@@ -118,6 +122,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     db = Database(settings.db_path)
     engine = Engine(db)
     engine.seed_themes()
+    engine.upgrade_event_configs()
     auth.init_pin(db, settings.host_pin)
     yt = youtube or YouTubeService(db, settings.youtube_api_key, settings.youtube_daily_quota, settings.enable_ytdlp)
     upd = updates or UpdateService(db, settings.version, settings.source_repo, settings.upgrade_dir)
@@ -335,8 +340,13 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         return {"ok": True}
 
     @app.post("/api/guest/superset/call")
-    async def guest_call_superset(guest: dict = Depends(current_guest)):
-        await run(engine.call_superset_vote, guest["id"], event_id=guest["event_id"])
+    async def guest_call_superset(body: CallIn | None = None, guest: dict = Depends(current_guest)):
+        await run(engine.call_superset_vote, guest["id"], (body or CallIn()).mode, event_id=guest["event_id"])
+        return {"ok": True}
+
+    @app.post("/api/guest/superset/pass")
+    async def guest_pass_superset(guest: dict = Depends(current_guest)):
+        await run(engine.pass_superset, guest["id"], event_id=guest["event_id"])
         return {"ok": True}
 
     @app.post("/api/guest/superset/vote")
@@ -442,6 +452,9 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     async def event_action(event_id: int, action: str):
         if action in VIDEO_ACTIONS:
             await run(engine.video_command, event_id, VIDEO_ACTIONS[action])
+            return {"ok": True}
+        if action in ("superset-now", "superset-after"):  # "now": this song kicks the set off
+            await run(engine.force_superset, event_id, action.split("-")[1], event_id=event_id)
             return {"ok": True}
         method = EVENT_ACTIONS.get(action)
         if not method:

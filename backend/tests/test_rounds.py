@@ -8,12 +8,11 @@ from app.engine import EngineError
 from tests.conftest import add, play_all
 
 
-def test_roll_superset_chance_and_overrides():
+def test_roll_superset_chance():
     rng = random.Random(0)
-    hits = sum(logic.roll_superset(0.15, None, rng) for _ in range(10_000))
+    hits = sum(logic.roll_superset(0.15, rng) for _ in range(10_000))
     assert 1200 < hits < 1800
-    assert logic.roll_superset(0.0, "force", rng) is True
-    assert logic.roll_superset(1.0, "cancel", rng) is False
+    assert not any(logic.roll_superset(0.0, rng) for _ in range(1000))
 
 
 def test_theme_never_repeats_back_to_back():
@@ -81,36 +80,24 @@ def test_force_spin_needs_a_round(engine, make_event):
         engine.force_spin(eid)
 
 
-def test_superset_round(engine, make_event):
-    eid, (a, b) = make_event(names=("Alex", "Blake"), superset_chance=1.0)
-    rnd = _rounds(engine, eid)[0]
-    assert rnd["is_superset"] and rnd["superset_theme_id"] == rnd["theme_id"]
-    s1 = add(engine, a)
-    add(engine, b)
-    later = add(engine, a)  # round 2
-    snap = engine.snapshot(eid)
-    assert snap["round"]["is_superset"]
-    flags = {q["id"]: q["is_superset"] for q in snap["queue"]}
-    assert flags[s1["id"]] and not flags[later["id"]]
-    assert engine.flag_item(eid, s1["id"], f"guest:{b['id']}") == 1
-    assert engine.flag_item(eid, s1["id"], f"guest:{b['id']}") == 1  # idempotent
-    assert engine.flag_item(eid, s1["id"], "host") == 2
+def test_themes_are_off_by_default_and_can_be_switched_on(engine):
+    ev = engine.create_event("Free night")
+    assert ev["config"]["themes_enabled"] is False and ev["config"]["superset_chance"] == 0
+    engine.join(ev["id"], "Alex")
+    engine.start_event(ev["id"])
+    snap = engine.snapshot(ev["id"])
+    assert snap["round"]["number"] == 1 and snap["round"]["theme"] is None
+    assert not [m for m in engine.drain() if m["message"]["type"] == "theme_spun"]
     with pytest.raises(EngineError):
-        engine.flag_item(eid, s1["id"], f"guest:{a['id']}")
-    with pytest.raises(EngineError):
-        engine.flag_item(eid, later["id"], "host")
+        engine.force_spin(ev["id"])
+    engine.update_event(ev["id"], None, {"themes_enabled": True})  # on mid-event: this round spins now
+    assert engine.snapshot(ev["id"])["round"]["theme"]["name"]
+    assert any(m["message"]["type"] == "theme_spun" for m in engine.drain())
 
 
-def test_force_and_cancel_superset(engine, make_event):
-    eid, (a, b) = make_event(names=("Alex", "Blake"))
-    engine.force_superset(eid)
-    for _ in range(2):
-        add(engine, a)
-        add(engine, b)
-    play_all(engine, eid)
-    r = _rounds(engine, eid)
-    assert not r[0]["is_superset"] and r[1]["is_superset"]
-    engine.cancel_superset(eid)          # ends the running Superset
-    assert not _rounds(engine, eid)[1]["is_superset"]
-    engine.cancel_superset(eid)          # nothing running: blocks the next roll
-    assert engine.get_event(eid)["superset_pending"] == "cancel"
+def test_events_from_before_the_switch_keep_their_themes(engine):
+    eid = engine.db.insert("INSERT INTO events(name, join_code, config, created_at) VALUES ('Old', 'OLD01', ?, 0)",
+                           ('{"superset_chance": 0.15}',))
+    engine.upgrade_event_configs()
+    assert engine.get_event(eid)["config"]["themes_enabled"] is True
+    assert engine.create_event("New")["config"]["themes_enabled"] is False

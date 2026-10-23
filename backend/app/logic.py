@@ -10,7 +10,8 @@ import unicodedata
 from typing import Iterable, Sequence
 
 DEFAULT_EVENT_CONFIG: dict = {
-    "superset_chance": 0.15,
+    "themes_enabled": False,     # spin a theme each round as a suggestion; off = singers pick freely
+    "superset_chance": 0.0,      # chance a new round opens with a Superset (they mostly come from votes)
     "recent_theme_window": 3,
     "prevent_duplicates": True,
     "safe_search": "moderate",   # none | moderate | strict
@@ -133,12 +134,28 @@ def vote_outcome(yes: int, no: int, eligible: int, closing: bool = False) -> str
     return None
 
 
-def roll_superset(chance: float, pending: str | None, rng: random.Random) -> bool:
-    if pending == "force":
-        return True
-    if pending == "cancel":
-        return False
-    return rng.random() < chance
+def roll_superset(chance: float, rng: random.Random) -> bool:
+    return chance > 0 and rng.random() < chance
+
+
+def set_order(guests: Sequence[dict], anchor_pos: int | None, include_anchor: bool) -> list[dict]:
+    """Singers in a Superset set: once round the singer order, carrying on from the rotation.
+
+    It starts after the singer at ``anchor_pos`` (or with them, when their song kicks the set off) and
+    wraps to the top, so nobody sings twice in a row."""
+    order = ordered_active(guests)
+    if anchor_pos is None:
+        return order
+    first = [g for g in order if g["rotation_pos"] > anchor_pos or (include_anchor and g["rotation_pos"] == anchor_pos)]
+    return first + [g for g in order if g not in first]
+
+
+def song_name(title: str) -> str:
+    """'Africa (Karaoke Version)' -> 'Africa': karaoke channels' extra words, for "Songs like …" themes."""
+    name = re.sub(r"\s*[\(\[][^)\]]*(karaoke|instrumental|lyrics|version|backing)[^)\]]*[\)\]]", "", title,
+                  flags=re.IGNORECASE)
+    name = re.sub(r"\s*[-|–]\s*(karaoke|instrumental|lyrics).*$", "", name, flags=re.IGNORECASE).strip()
+    return name or title.strip()
 
 
 # --------------------------------------------------------------------------- misc

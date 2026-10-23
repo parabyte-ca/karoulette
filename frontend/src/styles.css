@@ -427,3 +427,47 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 .smoke span:nth-child(3) { animation-delay: 3s; left: 50%; }
 @keyframes puff { 0% { transform: translate(0, 0) scale(0.4); opacity: 0; } 20% { opacity: 1; } 100% { transform: translate(1.5em, -5em) scale(2.4); opacity: 0; } }
 .smoke-banner { background: var(--card-2); border: 2px dashed var(--highlight); color: var(--highlight); font-weight: 800; padding: 0.6em 1em; border-radius: 12px; margin-bottom: 0.8rem; text-align: center; }
+
+/* ---------- Superset sets */
+.superset-panel { border-color: var(--highlight); box-shadow: 0 0 30px var(--glow-hl); }
+.superset-panel .label { color: var(--highlight); }
+.set-lineup { list-style: none; padding: 0; margin: 0.5em 0; display: flex; flex-direction: column; gap: 0.25em; }
+.set-slot { display: grid; grid-template-columns: 1.4em auto 1fr auto; gap: 0.5em; align-items: center; padding: 0.25em 0.4em; border-radius: 8px; }
+.set-icon { text-align: center; }
+.set-name { font-weight: 800; }
+.set-what { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.set-slot.singing { background: var(--highlight-wash); }
+.set-slot.singing .set-name, .set-slot.singing .set-what { color: var(--highlight); }
+.set-slot.sung, .set-slot.passed, .set-slot.skipped { opacity: 0.55; }
+.set-slot.waiting { background: var(--highlight-wash); outline: 2px solid var(--highlight); animation: glow 1.6s infinite; }
+.set-slot.waiting .set-what { color: var(--highlight); font-weight: 700; }
+.set-slot.mine .set-name { color: var(--highlight); }
+.set-slot .flag-btn { min-height: 34px; padding: 0.1em 0.6em; }
+.set-card { border: 2px solid var(--highlight); box-shadow: 0 0 30px var(--glow-hl); text-align: center; }
+.set-card.my-turn { animation: glow 1.2s infinite; }
+.set-card .set-lineup { text-align: left; }
+.set-me { font-weight: 800; font-size: 1.1em; margin: 0.6em 0 0.3em; }
+.set-actions { display: flex; gap: 0.5em; justify-content: center; flex-wrap: wrap; }
+.set-pick-note { background: var(--highlight-wash); border: 1px solid var(--highlight); border-radius: 10px; padding: 0.5em 0.7em; margin: 0.6em 0 0.3em; font-size: 0.95em; }
+.set-waiting { flex-direction: column; text-align: center; }
+.set-waiting .theme-pill { font-size: 2em; }
+.chooser { display: flex; flex-direction: column; gap: 0.6em; margin-top: 0.8em; }
+.chooser .btn { flex-direction: column; white-space: normal; min-height: 64px; line-height: 1.2; }
+.chooser .btn small { font-weight: 600; opacity: 0.8; font-size: 0.8em; }
+
+/* ---------- phones: admin and event pages never scroll sideways */
+@media (max-width: 700px) {
+  .page { padding: 1rem 0.8rem; }
+  .page-header { flex-wrap: wrap; }
+  .list-row { flex-wrap: wrap; }
+  .list-row > :first-child { flex: 1 1 12em; min-width: 0; }
+  .actions { flex-wrap: wrap; }
+  .card .row:not(.search) { flex-wrap: wrap; }
+  /* Tables become one card per row, each cell labelled. */
+  .table thead { display: none; }
+  .table, .table tbody, .table tr, .table td { display: block; width: 100%; }
+  .table tr { padding: 0.7em 0; border-bottom: 1px solid var(--line); }
+  .table td { border: 0; padding: 0.25em 0; display: flex; align-items: center; gap: 0.6em; }
+  .table td[data-label]::before { content: attr(data-label); flex: 0 0 6.5em; color: var(--muted); font-size: 0.8em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .table td.actions { justify-content: flex-start; padding-top: 0.5em; }
+}

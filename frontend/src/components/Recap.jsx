@@ -10,7 +10,7 @@ export default function Recap({ recap, eventName, me = null, size = "tv" }) {
     [recap.rounds, recap.rounds === 1 ? "round" : "rounds"],
   ];
   if (recap.duets) tiles.push([recap.duets, recap.duets === 1 ? "duet" : "duets"]);
-  if (recap.superset_rounds) tiles.push([recap.superset_rounds, recap.superset_rounds === 1 ? "Superset round" : "Superset rounds"]);
+  if (recap.superset_rounds) tiles.push([recap.superset_rounds, recap.superset_rounds === 1 ? "Superset" : "Supersets"]);
   const mine = me ? recap.per_singer?.[me] || 0 : null;
   const highlights = [
     recap.top_singers.length > 0 && ["🏆 Most songs", `${recap.top_singers.join(", ")} (${recap.top_count})`],

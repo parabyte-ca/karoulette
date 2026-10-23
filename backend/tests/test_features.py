@@ -198,35 +198,16 @@ def test_vote_outcome_rules():
     assert vote_outcome(0, 0, 3, closing=True) == "failed"   # nobody voted
 
 
-def test_guest_called_superset_passes_for_this_round(engine, make_event):
-    eid, (alex, blake, casey, dana) = make_event(names=("Alex", "Blake", "Casey", "Dana"))
-    for p in (alex, blake, casey):
-        add(engine, p)
-    engine.play_next(eid)
-    engine.call_superset_vote(blake["id"])
-    snap = engine.snapshot(eid)
-    assert snap["superset_vote"]["called_by_name"] == "Blake" and snap["superset_vote"]["eligible"] == 3
-    with pytest.raises(EngineError):
-        engine.vote_superset(blake["id"], True)        # the caller doesn't vote
-    with pytest.raises(EngineError):
-        engine.call_superset_vote(casey["id"])         # one vote at a time
-    engine.vote_superset(alex["id"], True)
-    assert not engine.snapshot(eid)["round"]["is_superset"]
-    engine.vote_superset(casey["id"], True)            # 2 of 3 others: majority
-    snap = engine.snapshot(eid)
-    assert snap["round"]["is_superset"] and snap["superset_vote"] is None
-    assert snap["now_playing"]["is_superset"] and all(q["is_superset"] for q in snap["queue"])
-    msgs = [m["message"] for m in engine.drain()]
-    assert any(m["type"] == "superset" and m["data"]["active"] for m in msgs)
-    with pytest.raises(EngineError):
-        engine.call_superset_vote(dana["id"])          # already a Superset
-
-
 def test_superset_vote_fails_on_time_and_each_singer_calls_once(engine, make_event, clock):
     eid, (alex, blake, casey, dana) = make_event(names=("Alex", "Blake", "Casey", "Dana"))
     add(engine, alex)
     engine.play_next(eid)
     engine.call_superset_vote(alex["id"])
+    assert engine.snapshot(eid)["superset_vote"]["eligible"] == 3
+    with pytest.raises(EngineError):
+        engine.vote_superset(alex["id"], True)         # the caller doesn't vote
+    with pytest.raises(EngineError):
+        engine.call_superset_vote(casey["id"])         # one vote at a time
     engine.vote_superset(blake["id"], True)
     engine.vote_superset(blake["id"], False)           # changing your mind is allowed
     engine.tick()
@@ -234,23 +215,21 @@ def test_superset_vote_fails_on_time_and_each_singer_calls_once(engine, make_eve
     clock.advance(61)
     engine.tick()                                      # time's up: 0 yes, 1 no
     snap = engine.snapshot(eid)
-    assert snap["superset_vote"] is None and not snap["round"]["is_superset"]
+    assert snap["superset_vote"] is None and snap["superset"] is None
     assert snap["vote_callers"] == [alex["id"]]
     with pytest.raises(EngineError):
         engine.call_superset_vote(alex["id"])
 
 
-def test_host_cancels_vote_and_new_round_closes_it(engine, make_event):
+def test_host_cancels_a_vote(engine, make_event):
     eid, (alex, blake, casey) = make_event()
-    add(engine, alex)
     add(engine, alex)
     engine.play_next(eid)
     engine.call_superset_vote(blake["id"])
     engine.cancel_superset(eid)
     assert engine.snapshot(eid)["superset_vote"] is None
-    engine.call_superset_vote(casey["id"])
-    engine.player_ended(eid, engine.get_event(eid)["now_playing_item_id"])  # Alex's round-2 song starts round 2
-    assert engine.snapshot(eid)["round"]["number"] == 2 and engine.snapshot(eid)["superset_vote"] is None
+    with pytest.raises(EngineError):
+        engine.cancel_superset(eid)                    # nothing left to cancel
 
 
 def test_superset_vote_needs_the_event_running_and_others(engine, make_event):
@@ -303,10 +282,16 @@ def test_vote_and_break_endpoints(client):  # noqa: F811
     assert client.post("/api/guest/superset/call", headers=h["Alex"]).status_code == 409  # not started
     client.post("/api/guest/queue", json={"video_id": "abcdefghijk"}, headers=h["Alex"])
     assert client.post(f"/api/host/events/{ev['id']}/actions/start").status_code == 200
-    assert client.post("/api/guest/superset/call", headers=h["Alex"]).status_code == 200
+    assert client.post("/api/guest/superset/call", json={"mode": "now"}, headers=h["Alex"]).status_code == 200
     assert client.post("/api/guest/superset/vote", json={"yes": True}, headers=h["Blake"]).status_code == 200
     assert client.post("/api/guest/superset/vote", json={"yes": True}, headers=h["Casey"]).status_code == 200
-    assert client.get("/api/guest/state", headers=h["Alex"]).json()["round"]["is_superset"]
+    sup = client.get("/api/guest/state", headers=h["Alex"]).json()["superset"]
+    assert sup["mode"] == "now" and sup["theme"] == "Songs like “Test Song”"
+    assert client.post("/api/guest/superset/pass", headers=h["Blake"]).status_code == 200
+    assert client.post(f"/api/host/events/{ev['id']}/actions/superset-cancel").status_code == 200
+    assert client.post(f"/api/host/events/{ev['id']}/actions/superset-after").status_code == 200
+    assert client.get("/api/guest/state", headers=h["Alex"]).json()["superset"]["mode"] == "after"
+    assert client.post(f"/api/host/events/{ev['id']}/actions/superset-cancel").status_code == 200
 
     assert client.post(f"/api/host/events/{ev['id']}/actions/pause-queue").status_code == 200
     state = client.get("/api/guest/state", headers=h["Alex"]).json()

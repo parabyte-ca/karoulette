@@ -6,6 +6,7 @@ import { useCountdown, useEventSocket } from "../lib/useEventSocket";
 import { decodeEntities, formatDuration } from "../lib/format";
 import ThemeSpinner from "../components/ThemeSpinner";
 import Recap from "../components/Recap";
+import { SupersetChooser, SupersetLineup } from "../components/Superset";
 import { Toasts, useToasts } from "../components/Toasts";
 import { formatWait, secondsUntil, singers, sings } from "../lib/eta";
 import { alertsSupported, notify, useInstall } from "../lib/pwa";
@@ -85,7 +86,7 @@ function JoinForm({ initialCode, onJoined }) {
   );
 }
 
-function SearchPanel({ canAdd, limitNote, onAdd, push, superset, partners }) {
+function SearchPanel({ canAdd, limitNote, onAdd, push, setPick, partners }) {
   const [q, setQ] = useState("");
   const [duet, setDuet] = useState("");
   const [results, setResults] = useState(null);
@@ -131,8 +132,9 @@ function SearchPanel({ canAdd, limitNote, onAdd, push, superset, partners }) {
                placeholder="Song or artist" enterKeyHint="search" />
         <button className="btn btn-primary" disabled={busy || !q.trim()}>{busy ? "…" : "Search"}</button>
       </form>
-      <p className="muted small">We add “karaoke” to your search for you.
-        {superset && " Superset round: your pick must fit the theme, or others can flag it!"}</p>
+      {setPick && <p className="set-pick-note">★ Your next pick is your <strong>Superset song</strong>: it must fit
+        “{setPick}”, or others can flag it!</p>}
+      <p className="muted small">We add “karaoke” to your search for you.</p>
       {partners.length > 0 && (
         <label className="duet-pick">
           <span>Sing it</span>
@@ -154,8 +156,9 @@ function SearchPanel({ canAdd, limitNote, onAdd, push, superset, partners }) {
                 <div className="r-title">{decodeEntities(r.title)}</div>
                 <div className="r-meta">{decodeEntities(r.channel)}{r.duration_s ? ` · ${formatDuration(r.duration_s)}` : ""}</div>
               </div>
-              <button className="btn btn-primary" disabled={!canAdd || adding === r.video_id} onClick={() => add(r)}>
-                {adding === r.video_id ? "…" : "Add"}
+              <button className={`btn ${setPick ? "btn-gold" : "btn-primary"}`} disabled={(!canAdd && !setPick) || adding === r.video_id}
+                      onClick={() => add(r)}>
+                {adding === r.video_id ? "…" : setPick ? "★ Add" : "Add"}
               </button>
             </li>
           ))}
@@ -188,7 +191,7 @@ function ReactionBar({ emojis, push }) {
 }
 
 /** A Superset called by a singer: everyone else votes yes or no, and the majority wins. */
-function VoteCard({ vote, theme, myId, serverNow, push }) {
+function VoteCard({ vote, myId, serverNow, push }) {
   const left = useCountdown(vote.ends_at, serverNow, 0);
   const mine = vote.called_by === myId;
   const voted = vote.voters.includes(myId);
@@ -199,9 +202,10 @@ function VoteCard({ vote, theme, myId, serverNow, push }) {
   return (
     <section className="card vote-card" aria-live="polite">
       <div className="label">★ Superset vote · {Math.ceil(left)} s left</div>
-      <p className="vote-question">{mine ? "You called a Superset on " : `${vote.called_by_name} wants a Superset on `}
-        <span className="theme-pill superset">{theme}</span></p>
-      <p className="muted small">If most say yes, every song this round must fit the theme.</p>
+      <p className="vote-question">{mine ? "You called a Superset" : `${vote.called_by_name} calls a Superset`}
+        {vote.mode === "now" && vote.song ? <>, kicked off by “{decodeEntities(vote.song)}”</> : " after this song"}</p>
+      <p className="muted small">If most say yes, everyone picks one extra song that fits
+        {vote.mode === "now" && vote.song ? " (songs like that one)" : " a theme we spin"}, and we go round in singer order.</p>
       {!mine && (
         <div className="vote-buttons">
           <button className="btn btn-gold btn-xl" onClick={() => cast(true)}>👍 Yes!</button>
@@ -222,6 +226,7 @@ function GuestHome({ me, onLeave }) {
   const [alerts, setAlerts] = useState(() => alertsSupported() && Notification.permission === "granted");
   const { canInstall, install, iosHint } = useInstall();
   const prevIdx = useRef(null);
+  const [choosing, setChoosing] = useState(false);
   const myId = me.guest.id;
 
   useEffect(() => { api("/api/public/themes").then(setThemes).catch(() => {}); }, []);
@@ -248,7 +253,14 @@ function GuestHome({ me, onLeave }) {
         window.alert("You signed in on another phone, so this one has been signed out.");
         onLeave();
         break;
-      case "superset": if (d.active) push(`★ SUPERSET round! Everyone sings: ${d.theme?.name}`, "gold", 9000); break;
+      case "superset":
+        if (d.active) navigator.vibrate?.([100, 60, 100, 60, 100]); // the notice says what it is
+        break;
+      case "superset_your_turn":
+        push(`★ It's your Superset turn! Pick a song that fits ${d.theme}. Everyone's waiting.`, "gold", 10000);
+        navigator.vibrate?.([300, 150, 300, 150, 300]);
+        notify("★ Your Superset turn!", `Pick a song that fits ${d.theme}.`);
+        break;
       case "guest_left":
         if (d.guest_id === myId && d.reason === "removed") {
           window.alert("🥖 You've been BOUCHED! The host removed you from this event.");
@@ -266,17 +278,25 @@ function GuestHome({ me, onLeave }) {
   const round = state?.round;
   const spinLeft = useCountdown(round?.spun_at ? round.spun_at + round.spin_seconds : null, serverNow, 0);
   const readyLeft = useCountdown(state?.now_playing?.starts_at || null, serverNow, 0);
+  const sup = state?.superset;
+  const setSpinLeft = useCountdown(sup?.spun_at ? sup.spun_at + sup.spin_seconds : null, serverNow, 0);
 
   const addSong = async (r, duetId) => {
+    const forSet = state?.superset?.slots.find((s) => s.guest_id === myId)?.status === "pending";
     await api("/api/guest/queue", { method: "POST", guest: true,
       body: { video_id: r.video_id, title: r.title, channel: r.channel, thumbnail: r.thumbnail, duet_guest_id: duetId } });
-    push(duetId ? "Duet added! 🎶 Your partner gets a heads-up." : "Song added! 🎶 Add as many as you like.", "success");
+    push(forSet ? "★ That's your Superset song!" : duetId ? "Duet added! 🎶 Your partner gets a heads-up."
+      : "Song added! 🎶 Add as many as you like.", "success");
   };
 
-  const callSuperset = async () => {
-    if (!window.confirm(`Call a Superset on “${state.round.theme?.name}”? Everyone else votes, and if most say yes, `
-      + "every song this round must fit the theme.")) return;
-    try { await api("/api/guest/superset/call", { method: "POST", guest: true }); }
+  const callSuperset = async (mode) => {
+    setChoosing(false);
+    try { await api("/api/guest/superset/call", { method: "POST", guest: true, body: { mode } }); }
+    catch (e) { push(e.message, "error"); }
+  };
+
+  const flag = async (itemId) => {
+    try { await api(`/api/guest/flag/${itemId}`, { method: "POST", guest: true }); push("Flag sent to the host.", "info"); }
     catch (e) { push(e.message, "error"); }
   };
 
@@ -315,7 +335,10 @@ function GuestHome({ me, onLeave }) {
   if (!state) return <main className="phone center-page"><p className="muted">Connecting…</p></main>;
 
   const ev = state.event;
-  const superset = round.is_superset;
+  const superset = !!sup;
+  const mySlot = sup?.slots.find((s) => s.guest_id === myId);
+  const myTurnWaiting = sup?.waiting_for === myId;
+  const setSpinning = !!sup?.spun_at && setSpinLeft > 0;
   const spinning = !!round.spun_at && spinLeft > 0;
   const mySongs = state.queue.filter((i) => i.guest_id === myId);
   const myDuets = state.queue.filter((i) => i.duet_guest_id === myId);
@@ -331,6 +354,7 @@ function GuestHome({ me, onLeave }) {
   let headline;
   let sub = null;
   if (ev.status === "ended") { headline = "Thanks for singing!"; sub = "This event has ended."; }
+  else if (myTurnWaiting) { headline = "★ Your Superset turn!"; sub = `Pick a song that fits ${sup.theme}. Everyone's waiting!`; }
   else if (gettingReady) { headline = "🎤 You're up! Grab the mic"; sub = `Your song starts in ${Math.ceil(readyLeft)} s.`; }
   else if (singingNow) headline = "🎤 You're singing now!";
   else if (firstIdx === 0) { headline = "Your song is up next!"; sub = `About ${wait(0).replace("≈ ", "")} to go. Get ready!`; }
@@ -339,8 +363,16 @@ function GuestHome({ me, onLeave }) {
   if (ev.status === "draft") sub = "The host hasn't started yet, but you can add songs now.";
   const partners = state.guests.filter((g) => g.id !== myId);
   const vote = state.superset_vote;
-  const canCall = ev.status === "active" && round.number > 0 && round.theme && !superset && !vote
+  const canCall = ev.status === "active" && round.number > 0 && !superset && !vote
     && !(state.vote_callers || []).includes(myId) && partners.length > 0;
+  const slotText = {
+    pending: "Pick a song that fits: your next pick is your Superset song. It's a bonus; your other songs keep their places.",
+    picked: `Your Superset song: “${decodeEntities(mySlot?.title || "")}”. You'll sing it in singer order.`,
+    singing: "You're on! 🎤",
+    sung: "Done! Nice one. ✓",
+    passed: "You're sitting this one out.",
+    skipped: "Your turn was skipped.",
+  };
   if (ev.paused && ev.status === "active") sub = "🚬 Smoke break! The music's on hold. Keep adding songs.";
 
   return (
@@ -356,11 +388,30 @@ function GuestHome({ me, onLeave }) {
         </div>
       </header>
 
-      {superset && (
-        <div className="superset-banner">★ SUPERSET ROUND · Everyone sings: <strong>{round.theme?.name}</strong></div>
+      {sup && (
+        <section className={`card set-card ${myTurnWaiting ? "my-turn" : ""}`}>
+          <div className="label">★ Superset · everyone sings</div>
+          {setSpinning ? (
+            <ThemeSpinner spinKey={`set-${sup.id}-${sup.spun_at}`} candidates={spinMeta.candidates?.length ? spinMeta.candidates : themes}
+                          result={sup.theme} duration={sup.spin_seconds} superset size="md" />
+          ) : <div className="theme-pill superset">{sup.theme}</div>}
+          {sup.inspired_by && <div className="muted small">Kicked off by “{decodeEntities(sup.inspired_by)}”</div>}
+          {mySlot && <p className={`set-me ${myTurnWaiting ? "pulse" : ""}`}>{myTurnWaiting ? "★ It's your turn! Pick now: everyone's waiting." : slotText[mySlot.status]}</p>}
+          {mySlot && ["pending", "picked"].includes(mySlot.status) && (
+            <div className="set-actions">
+              {mySlot.status === "picked" && (
+                <button className="btn" onClick={() => window.confirm("Pick a different Superset song?") &&
+                  songAction(`/api/guest/queue/${mySlot.item_id}`, { method: "DELETE" })}>Change my pick</button>
+              )}
+              <button className="btn btn-link" onClick={() => window.confirm("Sit this Superset out?") &&
+                songAction("/api/guest/superset/pass")}>Sit this one out</button>
+            </div>
+          )}
+          <SupersetLineup superset={sup} myId={myId} onFlag={flag} />
+        </section>
       )}
       {ev.paused && ev.status === "active" && <div className="smoke-banner">🚬 Smoke break! Back in a few.</div>}
-      {vote && <VoteCard vote={vote} theme={round.theme?.name} myId={myId} serverNow={serverNow} push={push} />}
+      {vote && <VoteCard vote={vote} myId={myId} serverNow={serverNow} push={push} />}
 
       <nav className="tabs phone-tabs">
         <button className={`tab ${tab === "me" ? "active" : ""}`} onClick={() => setTab("me")}>My songs ({mySongs.length})</button>
@@ -375,17 +426,20 @@ function GuestHome({ me, onLeave }) {
             {ev.status !== "ended" && alertsSupported() && !alerts && (
               <button className="btn btn-link small" onClick={turnOnAlerts}>🔔 Buzz me when I'm nearly up</button>
             )}
-            {round.number > 0 && ev.status !== "ended" && (
+            {canCall && (
+              <button className="btn btn-gold call-superset" onClick={() => setChoosing(true)}>★ Call a Superset</button>
+            )}
+            {round.number > 0 && ev.status !== "ended" && (round.theme || spinning) && (
               <div className="round-theme">
                 <div className="label">Round {round.number} theme</div>
                 {spinning ? (
                   <ThemeSpinner spinKey={`${round.number}-${round.spun_at}`} candidates={spinMeta.candidates?.length ? spinMeta.candidates : themes}
-                                result={round.theme?.name} duration={round.spin_seconds} superset={superset} size="md" />
+                                result={round.theme?.name} duration={round.spin_seconds} size="md" />
                 ) : round.theme && (
                   <>
-                    <div className={`theme-pill ${superset ? "superset" : ""}`}>{round.theme.name}</div>
+                    <div className="theme-pill">{round.theme.name}</div>
                     {round.theme.description && <div className="muted small">{round.theme.description}</div>}
-                    {canCall && <button className="btn btn-gold call-superset" onClick={callSuperset}>★ Call a Superset</button>}
+                    <div className="muted small">Just a suggestion: sing what you like!</div>
                   </>
                 )}
               </div>
@@ -396,7 +450,8 @@ function GuestHome({ me, onLeave }) {
             <section className="card"><Recap recap={state.recap} eventName={ev.name} me={me.guest.name} size="phone" /></section>
           )}
 
-          {ev.status !== "ended" && <SearchPanel canAdd={!atCap} onAdd={addSong} push={push} superset={superset}
+          {ev.status !== "ended" && <SearchPanel canAdd={!atCap} onAdd={addSong} push={push}
+                                                 setPick={mySlot?.status === "pending" ? sup.theme : null}
                                                  partners={partners}
                                                  limitNote={atCap ? `You have ${mySongs.length} songs waiting, the most the host allows. Add another once one has played.` : ""} />}
 
@@ -468,6 +523,13 @@ function GuestHome({ me, onLeave }) {
               <strong>{singers(state.now_playing)}</strong> · {decodeEntities(state.now_playing.title)}
             </div>
           )}
+          {sup && (
+            <>
+              <h3>★ Superset first: {sup.theme}</h3>
+              <SupersetLineup superset={sup} myId={myId} onFlag={flag} />
+              <h3>Then the queue</h3>
+            </>
+          )}
           {!state.queue.length && <p className="muted">The queue is empty.</p>}
           <ol className="results">
             {state.queue.map((i) => (
@@ -479,10 +541,7 @@ function GuestHome({ me, onLeave }) {
                     {i.flags > 0 ? ` · ⚑ ${i.flags}` : ""}</div>
                 </div>
                 {i.is_superset && i.guest_id !== myId && (
-                  <button className="btn" title="Flag as off-theme" onClick={async () => {
-                    try { await api(`/api/guest/flag/${i.id}`, { method: "POST", guest: true }); push("Flag sent to the host.", "info"); }
-                    catch (e) { push(e.message, "error"); }
-                  }}>⚑</button>
+                  <button className="btn" title="Flag as off-theme" onClick={() => flag(i.id)}>⚑</button>
                 )}
               </li>
             ))}
@@ -509,6 +568,10 @@ function GuestHome({ me, onLeave }) {
         <button className="btn btn-link" onClick={leave}>Leave event</button>
       </footer>
       {state.now_playing && ev.status === "active" && <ReactionBar emojis={state.reactions || []} push={push} />}
+      {choosing && (
+        <SupersetChooser nowPlaying={state.now_playing} onClose={() => setChoosing(false)} onChoose={callSuperset}
+                         note="Everyone else votes; if most say yes, it's on." />
+      )}
       <Toasts toasts={toasts} />
     </div>
   );

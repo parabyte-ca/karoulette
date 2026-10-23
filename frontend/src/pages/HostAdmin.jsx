@@ -38,18 +38,19 @@ function ThemesTab({ push }) {
   return (
     <section className="card">
       <h2>Themes</h2>
-      <p className="muted">Each round spins one theme as guidance for everyone's picks. Weight makes a theme more (or less) likely to come up.
-        Disabled themes are never spun.</p>
+      <p className="muted">Themes are switched on per event (Host admin → Events). When they're on, each round spins one theme
+        as a suggestion; when they're off, singers pick freely. Supersets spin from this list too. Weight makes a theme
+        more (or less) likely to come up. Disabled themes are never spun.</p>
       <table className="table">
         <thead><tr><th>Name</th><th>Description</th><th>Weight</th><th>Enabled</th><th /></tr></thead>
         <tbody>
           {themes.map((t) => (editing?.id === t.id ? (
             <tr key={t.id}>
-              <td><input value={editing.name} maxLength={60} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></td>
-              <td><input value={editing.description} maxLength={280} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></td>
-              <td><input type="number" min="0" max="100" step="0.5" value={editing.weight}
+              <td data-label="Name"><input value={editing.name} maxLength={60} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></td>
+              <td data-label="Description"><input value={editing.description} maxLength={280} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></td>
+              <td data-label="Weight"><input type="number" min="0" max="100" step="0.5" value={editing.weight}
                          onChange={(e) => setEditing({ ...editing, weight: e.target.value })} /></td>
-              <td><input type="checkbox" checked={editing.enabled} onChange={(e) => setEditing({ ...editing, enabled: e.target.checked })} /></td>
+              <td data-label="Enabled"><input type="checkbox" checked={editing.enabled} onChange={(e) => setEditing({ ...editing, enabled: e.target.checked })} /></td>
               <td className="actions">
                 <button className="btn btn-primary" onClick={() => save(editing, t.id)}>Save</button>
                 <button className="btn" onClick={() => setEditing(null)}>Cancel</button>
@@ -57,10 +58,10 @@ function ThemesTab({ push }) {
             </tr>
           ) : (
             <tr key={t.id} className={t.enabled ? "" : "disabled"}>
-              <td><strong>{t.name}</strong></td>
-              <td className="muted">{t.description}</td>
-              <td>{t.weight}</td>
-              <td>
+              <td data-label="Name"><strong>{t.name}</strong></td>
+              <td data-label="Description" className="muted">{t.description}</td>
+              <td data-label="Weight">{t.weight}</td>
+              <td data-label="Enabled">
                 <input type="checkbox" checked={t.enabled} aria-label={`Enable ${t.name}`}
                        onChange={(e) => save({ ...t, enabled: e.target.checked }, t.id)} />
               </td>
@@ -180,6 +181,7 @@ function EventSettings({ eventId, push, onChanged }) {
             </select>
           </label>
         </div>
+        {toggle("themes_enabled", "Themes: spin a theme each round as a suggestion (off: singers pick freely)")}
         {toggle("prevent_duplicates", "Prevent the same song twice in one event")}
         {toggle("autoplay", "Start playing automatically when the first song is queued")}
         <div className="row wrap">
@@ -221,14 +223,24 @@ function EventSettings({ eventId, push, onChanged }) {
       </section>
 
       <section className="card">
-        <h2>Round themes</h2>
-        {!state.rounds.length && <p className="muted">No rounds yet. Round 1 spins when the event starts.</p>}
-        <ul className="list compact">
-          {state.rounds.map((r) => (
-            <li key={r.number}>Round {r.number}: <strong>{r.theme || "—"}</strong>
-              {r.is_superset && <span className="pill">Superset</span>}</li>
-          ))}
-        </ul>
+        <h2>Themes and Supersets</h2>
+        {!cfg.themes_enabled && <p className="muted small">Themes are off: singers pick freely. Supersets still spin a
+          theme (or take one from the song that kicks them off).</p>}
+        {state.rounds.length > 0 && (
+          <ul className="list compact">
+            {state.rounds.map((r) => <li key={r.number}>Round {r.number}: <strong>{r.theme}</strong></li>)}
+          </ul>
+        )}
+        {state.superset_history.length > 0 && (
+          <ul className="list compact">
+            {state.superset_history.map((x, n) => (
+              <li key={n}>★ Superset: <strong>{x.theme}</strong>
+                <span className="pill">{{ vote: "voted in", host: "by the host", random: "random" }[x.source]}</span>
+                {x.status !== "done" && <span className="pill">{x.status === "active" ? "under way" : "cancelled"}</span>}</li>
+            ))}
+          </ul>
+        )}
+        {!state.rounds.length && !state.superset_history.length && <p className="muted">Nothing yet.</p>}
       </section>
     </>
   );

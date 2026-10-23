@@ -53,7 +53,7 @@ def test_host_endpoints_require_login(client):
 
 def test_full_guest_flow(client):
     login(client)
-    created = client.post("/api/host/events", json={"name": "Friday", "config": {"superset_chance": 0}}).json()
+    created = client.post("/api/host/events", json={"name": "Friday", "config": {"superset_chance": 0, "themes_enabled": True}}).json()
     code = created["join_code"]
     assert client.get(f"/api/public/events/{code}").json()["name"] == "Friday"
     assert client.get(f"/api/public/qr.svg?code={code}").headers["content-type"].startswith("image/svg")

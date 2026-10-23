@@ -7,6 +7,7 @@ import { decodeEntities, formatDuration } from "../lib/format";
 import YouTubePlayer from "../components/YouTubePlayer";
 import ThemeSpinner from "../components/ThemeSpinner";
 import Recap from "../components/Recap";
+import { SupersetChooser, SupersetLineup } from "../components/Superset";
 import { Toasts, useToasts } from "../components/Toasts";
 import { singers } from "../lib/eta";
 
@@ -70,6 +71,7 @@ export default function HostScreen() {
   const [reactions, setReactions] = useState([]);
   const [bouched, setBouched] = useState(null);
   const [showRemote, setShowRemote] = useState(false);
+  const [choosing, setChoosing] = useState(false);
   const { toasts, push } = useToasts();
   const playerRef = useRef(null);
   const hideTimer = useRef(null);
@@ -90,8 +92,8 @@ export default function HostScreen() {
     const d = msg.data || {};
     switch (msg.type) {
       case "notice":
-        // Bouches and smoke breaks get the whole screen, so skip their toasts here.
-        if (!msg.for_guest_id && !["bouched", "paused"].includes(d.kind)) push(d.text, d.level);
+        // Bouches, smoke breaks and Supersets get the whole screen, so skip their toasts here.
+        if (!msg.for_guest_id && !["bouched", "paused", "superset"].includes(d.kind)) push(d.text, d.level);
         break;
       case "bouched":
         setBouched(d.name);
@@ -110,7 +112,7 @@ export default function HostScreen() {
         break;
       case "superset":
         if (d.active) {
-          setSupersetFlash(d.theme?.name || "Superset");
+          setSupersetFlash({ theme: d.spun ? null : d.theme?.name || "your pick" });
           setTimeout(() => setSupersetFlash(null), 4000);
         }
         break;
@@ -186,6 +188,9 @@ export default function HostScreen() {
   const readyLeft = useCountdown(nowPlaying?.starts_at || null, serverNow, 0);
   const gettingReady = !!nowPlaying && readyLeft > 0;
   const vote = state?.superset_vote;
+  const sup = state?.superset;
+  const setSpinLeft = useCountdown(sup?.spun_at ? sup.spun_at + sup.spin_seconds : null, serverNow, 0);
+  const setSpinning = !!sup?.spun_at && setSpinLeft > 0;
   const voteLeft = useCountdown(vote?.ends_at || null, serverNow, 0);
   pausedRef.current = !!state?.event.paused;
 
@@ -199,7 +204,9 @@ export default function HostScreen() {
   if (!state) return <main className="center-page"><p className="muted">Connecting to the event…</p></main>;
 
   const ev = state.event;
-  const superset = state.round.is_superset;
+  const superset = !!sup;
+  const themesOn = !!ev.config.themes_enabled;
+  const waitingFor = sup?.waiting_for ? sup.slots.find((s) => s.guest_id === sup.waiting_for) : null;
   const paused = ev.paused;
   const qrSrc = `/api/public/qr.svg?code=${ev.join_code}`;
   const upNext = state.queue[0];
@@ -225,6 +232,20 @@ export default function HostScreen() {
       )}
     </div>
   );
+  const setTheme = setSpinning ? (
+    <ThemeSpinner spinKey={`set-${sup.id}-${sup.spun_at}`} candidates={spinMeta.candidates || themes}
+                  result={sup.theme} duration={sup.spin_seconds} superset size={idle ? "xl" : "lg"} />
+  ) : sup && <div className="theme-pill superset">{sup.theme}</div>;
+  const supersetPanel = sup && (
+    <div className="side-card turn-panel superset-panel">
+      <div className="label">★ Superset · everyone sings</div>
+      {setTheme}
+      {sup.inspired_by && !setSpinning && <div className="turn-sub small">Kicked off by “{decodeEntities(sup.inspired_by)}”</div>}
+      {sup.description && !setSpinning && <div className="turn-sub small">{sup.description}</div>}
+      <SupersetLineup superset={sup} />
+      <div className="turn-sub small">Pick a song that fits on your phone. Then the queue carries on.</div>
+    </div>
+  );
   const order = state.guests.map((g) => g.name);
   const newNames = new Set(state.guests.filter((g) => g.new_singer).map((g) => g.id));
 
@@ -237,8 +258,7 @@ export default function HostScreen() {
         </div>
         <div className="tv-round">
           {state.round.number > 0 && <span>Round {state.round.number}</span>}
-          {superset && <span className="superset-tag">SUPERSET · {state.round.theme?.name}</span>}
-          {ev.superset_pending === "force" && !superset && <span className="pending-tag">Superset next round!</span>}
+          {superset && <span className="superset-tag">SUPERSET · {setSpinning ? "spinning…" : sup.theme}</span>}
           {!connected && <span className="error-tag">Reconnecting…</span>}
         </div>
       </header>
@@ -260,7 +280,7 @@ export default function HostScreen() {
       {supersetFlash && (
         <div className="superset-flash" aria-live="assertive">
           <div className="superset-word">SUPERSET!</div>
-          <div className="superset-theme">Everyone sings: {supersetFlash}</div>
+          <div className="superset-theme">{supersetFlash.theme ? `Everyone sings: ${supersetFlash.theme}` : "Spinning the theme…"}</div>
         </div>
       )}
 
@@ -297,9 +317,21 @@ export default function HostScreen() {
                 </div>
               </div>
             )}
-            {idle && !paused && !(ev.status === "ended" && state.recap) && (
+            {idle && !paused && waitingFor && (
+              <div className="idle-overlay set-waiting" aria-live="polite">
+                <div className="smoke-text">
+                  <div className="label">★ Superset</div>
+                  {setTheme}
+                  <div className="smoke-sub">Waiting for <strong>{waitingFor.name}</strong> to pick a song that fits…</div>
+                  <div className="muted">Pick on your phone, or tap “Sit this one out”.</div>
+                  <button className={`btn ${controlsVisible ? "" : "hidden"}`} onClick={() => act("superset-skip-turn")}>
+                    ⏭ Skip {waitingFor.name}'s turn</button>
+                </div>
+              </div>
+            )}
+            {idle && !paused && !waitingFor && !(ev.status === "ended" && state.recap) && (
               <div className="idle-overlay">
-                {spinning ? roundPanel : (
+                {spinning ? roundPanel : setSpinning ? supersetPanel : (
                   <>
                     <img className="qr-big" src={qrSrc} alt={`QR code to join ${ev.name}`} />
                     <div className="idle-text">
@@ -334,8 +366,8 @@ export default function HostScreen() {
           {vote && (
             <div className="side-card vote-panel" aria-live="polite">
               <div className="label">★ Superset vote · {Math.ceil(voteLeft)} s</div>
-              <div className="vote-title"><strong>{vote.called_by_name}</strong> wants everyone to sing
-                {" "}<span className="theme-pill superset">{round.theme?.name}</span></div>
+              <div className="vote-title"><strong>{vote.called_by_name}</strong> calls a Superset
+                {vote.mode === "now" && vote.song ? <>, kicked off by <strong>“{decodeEntities(vote.song)}”</strong></> : " after this song"}</div>
               <div className="vote-bars">
                 <div className="vote-bar yes"><span style={{ width: `${(vote.yes / Math.max(1, vote.eligible)) * 100}%` }} /><b>Yes {vote.yes}</b></div>
                 <div className="vote-bar no"><span style={{ width: `${(vote.no / Math.max(1, vote.eligible)) * 100}%` }} /><b>No {vote.no}</b></div>
@@ -343,19 +375,19 @@ export default function HostScreen() {
               <div className="turn-sub small">Vote on your phone! Majority wins ({vote.yes + vote.no} of {vote.eligible} voted).</div>
             </div>
           )}
-          {!(idle && spinning) && roundPanel}
+          {sup ? !(idle && setSpinning) && supersetPanel : themesOn && !(idle && spinning) && roundPanel}
 
           <div className="side-card grow">
-            <div className="label">Up next · Queue ({state.queue.length})</div>
+            <div className="label">{sup ? "Then the queue" : "Up next · Queue"} ({state.queue.length})</div>
             {!upNext && <div className="muted">Nothing queued yet</div>}
             <ol className="queue">
               {state.queue.map((item, idx) => (
-                <li key={item.id} className={`queue-item ${idx === 0 ? "next" : ""}`}>
+                <li key={item.id} className={`queue-item ${idx === 0 && !sup ? "next" : ""}`}>
                   <img src={item.thumbnail} alt="" loading="lazy" />
                   <div className="q-text">
                     <div className="q-title">{decodeEntities(item.title)}</div>
                     <div className="q-meta">
-                      {idx === 0 && <span className="next-tag">Up next</span>}
+                      {idx === 0 && !sup && <span className="next-tag">Up next</span>}
                       <span className="q-singer">{singers(item)}</span>
                       {newNames.has(item.guest_id) && <span className="new-tag">New</span>}
                       {item.duration_s ? ` · ${formatDuration(item.duration_s)}` : ""}
@@ -405,10 +437,10 @@ export default function HostScreen() {
           </button>
         )}
         <button className="btn" onClick={() => act("skip-song")} disabled={!nowPlaying && !state.queue.length}>⏭ Skip song</button>
-        <button className="btn" onClick={() => act("spin")} disabled={!round.number}>🎰 Re-spin theme</button>
-        {(superset || vote || ev.superset_pending === "force")
-          ? <button className="btn" onClick={() => act("superset-cancel")}>✖ Cancel superset</button>
-          : <button className="btn btn-gold" onClick={() => act("superset-force")}>★ Force superset</button>}
+        {themesOn && <button className="btn" onClick={() => act("spin")} disabled={!round.number}>🎰 Re-spin theme</button>}
+        {(superset || vote)
+          ? <button className="btn" onClick={() => act("superset-cancel", superset ? "End the Superset? Picks not sung yet are dropped." : null)}>✖ Cancel superset</button>
+          : <button className="btn btn-gold" disabled={ev.status !== "active"} onClick={() => setChoosing(true)}>★ Superset</button>}
         <span className="spacer" />
         <button className="btn" onClick={() => setShowRemote(true)}>📱 Remote</button>
         <Link className="btn" to="/host/admin">Admin</Link>
@@ -416,6 +448,10 @@ export default function HostScreen() {
         <button className="btn btn-danger" disabled={ev.status === "ended"}
                 onClick={() => act("end", "End this event for everyone? The queue will be cleared.")}>End event</button>
       </footer>
+      {choosing && (
+        <SupersetChooser nowPlaying={nowPlaying} title="Declare a Superset" onClose={() => setChoosing(false)}
+                         onChoose={(mode) => { setChoosing(false); act(`superset-${mode}`); }} />
+      )}
       {showRemote && (
         <div className="modal-backdrop" onClick={() => setShowRemote(false)}>
           <div className="card modal" onClick={(e) => e.stopPropagation()}>

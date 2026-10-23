@@ -6,6 +6,7 @@ import { useCountdown, useEventSocket } from "../lib/useEventSocket";
 import { decodeEntities, formatDuration } from "../lib/format";
 import { singers } from "../lib/eta";
 import { Toasts, useToasts } from "../components/Toasts";
+import { SupersetChooser, SupersetLineup } from "../components/Superset";
 
 /** The host's phone remote: playback, volume and queue control without walking to the TV. */
 export default function HostRemote() {
@@ -13,6 +14,7 @@ export default function HostRemote() {
   const [code, setCode] = useState(null);
   const [error, setError] = useState("");
   const { toasts, push } = useToasts();
+  const [choosing, setChoosing] = useState(false);
 
   useEffect(() => {
     api(`/api/host/events/${eventId}/state`).then((s) => setCode(s.event.join_code)).catch((e) => setError(e.message));
@@ -39,8 +41,10 @@ export default function HostRemote() {
   const ev = state.event;
   const np = state.now_playing;
   const gettingReady = !!np && readyLeft > 0;
-  const superset = state.round.is_superset;
+  const sup = state.superset;
+  const superset = !!sup;
   const vote = state.superset_vote;
+  const waitingFor = sup?.waiting_for ? sup.slots.find((s) => s.guest_id === sup.waiting_for) : null;
   const paused = ev.paused;
 
   return (
@@ -67,9 +71,10 @@ export default function HostRemote() {
           <div className="muted">{ev.status === "active" ? "Queue a song or press Play next." : ev.status === "ended" ? "This event has ended." : "Start the event when everyone's ready."}</div>
         )}
         {state.round.number > 0 && (
-          <div className="muted small">Round {state.round.number}{state.round.theme ? ` · ${state.round.theme.name}` : ""}{superset ? " · ★ Superset" : ""}</div>
+          <div className="muted small">Round {state.round.number}{state.round.theme ? ` · ${state.round.theme.name}` : ""}{superset ? ` · ★ Superset: ${sup.theme}` : ""}</div>
         )}
         {vote && <div className="warning small">★ Superset vote by {vote.called_by_name}: yes {vote.yes} · no {vote.no} of {vote.eligible}</div>}
+        {waitingFor && <div className="warning small">★ Waiting for {waitingFor.name} to pick their Superset song.</div>}
         {paused && <div className="warning small">🚬 Smoke break: the queue is on hold.</div>}
       </section>
 
@@ -92,14 +97,24 @@ export default function HostRemote() {
         {ev.status === "active" && !paused && (
           <button className="btn btn-xl wide" onClick={() => act("pause-queue")}>🚬 Smoke break (pause queue)</button>
         )}
-        <button className="btn" disabled={!state.round.number} onClick={() => act("spin")}>🎰 Re-spin theme</button>
-        {(superset || vote || ev.superset_pending === "force")
-          ? <button className="btn" onClick={() => act("superset-cancel")}>✖ Cancel superset</button>
-          : <button className="btn btn-gold" onClick={() => act("superset-force")}>★ Force superset</button>}
+        {waitingFor && (
+          <button className="btn wide" onClick={() => act("superset-skip-turn")}>⏭ Skip {waitingFor.name}'s Superset turn</button>
+        )}
+        {ev.config.themes_enabled && <button className="btn" disabled={!state.round.number} onClick={() => act("spin")}>🎰 Re-spin theme</button>}
+        {(superset || vote)
+          ? <button className="btn" onClick={() => act("superset-cancel", superset ? "End the Superset? Picks not sung yet are dropped." : null)}>✖ Cancel superset</button>
+          : <button className="btn btn-gold" disabled={ev.status !== "active"} onClick={() => setChoosing(true)}>★ Superset</button>}
       </section>
 
+      {sup && (
+        <section className="card">
+          <h3>★ Superset: {sup.theme}</h3>
+          <SupersetLineup superset={sup} />
+        </section>
+      )}
+
       <section className="card">
-        <h3>Queue ({state.queue.length})</h3>
+        <h3>{sup ? "Then the queue" : "Queue"} ({state.queue.length})</h3>
         {!state.queue.length && <p className="muted">Nothing queued yet.</p>}
         <ol className="results">
           {state.queue.map((item, idx) => (
@@ -127,6 +142,10 @@ export default function HostRemote() {
         <button className="btn btn-danger" disabled={ev.status === "ended"}
                 onClick={() => act("end", "End this event for everyone? The queue will be cleared.")}>End event</button>
       </footer>
+      {choosing && (
+        <SupersetChooser nowPlaying={np} title="Declare a Superset" onClose={() => setChoosing(false)}
+                         onChoose={(mode) => { setChoosing(false); act(`superset-${mode}`); }} />
+      )}
       <Toasts toasts={toasts} />
     </div>
   );

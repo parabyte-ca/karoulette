@@ -116,6 +116,8 @@ CREATE TABLE IF NOT EXISTS superset_votes (           -- a guest calls a Superse
     round_id INTEGER REFERENCES rounds(id) ON DELETE CASCADE,
     called_by INTEGER REFERENCES guests(id) ON DELETE SET NULL,
     status TEXT NOT NULL DEFAULT 'open',          -- open | passed | failed | cancelled
+    mode TEXT NOT NULL DEFAULT 'after',           -- now (the song playing starts the set) | after
+    item_id INTEGER,                              -- the song playing when it was called
     started_at REAL NOT NULL,
     ends_at REAL NOT NULL,
     closed_at REAL
@@ -127,6 +129,32 @@ CREATE TABLE IF NOT EXISTS superset_ballots (
     guest_id INTEGER NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
     yes INTEGER NOT NULL,
     PRIMARY KEY (vote_id, guest_id)
+);
+
+-- A Superset set: one extra song per singer, in singer order, on one theme. Then the queue carries on.
+CREATE TABLE IF NOT EXISTS superset_sets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    round_no INTEGER NOT NULL DEFAULT 0,          -- round it was declared in (random rolls: the round it opens)
+    source TEXT NOT NULL,                         -- vote | host | random
+    mode TEXT NOT NULL,                           -- now | after
+    theme_id INTEGER REFERENCES themes(id) ON DELETE SET NULL,
+    theme_name TEXT NOT NULL,
+    inspired_by TEXT,                             -- "Title" of the song that kicked it off ("start now")
+    spun_at REAL,                                 -- set when the theme was spun from the list
+    status TEXT NOT NULL DEFAULT 'active',        -- active | done | cancelled
+    started_at REAL NOT NULL,
+    ended_at REAL
+);
+CREATE INDEX IF NOT EXISTS ix_sets_event ON superset_sets(event_id, status);
+
+CREATE TABLE IF NOT EXISTS superset_slots (
+    set_id INTEGER NOT NULL REFERENCES superset_sets(id) ON DELETE CASCADE,
+    guest_id INTEGER NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',       -- pending | picked | sung | passed | skipped
+    item_id INTEGER REFERENCES queue_items(id) ON DELETE SET NULL,
+    PRIMARY KEY (set_id, guest_id)
 );
 
 CREATE TABLE IF NOT EXISTS search_cache (
@@ -151,7 +179,7 @@ CREATE TABLE IF NOT EXISTS quota_ledger (
 
 
 # Columns added after the first release (v0.6.0: free song submission with a fair round-robin queue;
-# v0.7.0: get-ready countdown, duets, rejoin codes and the smoke-break pause).
+# v0.7.0: get-ready countdown, duets, rejoin codes, Superset sets and the smoke-break pause).
 ADDED_COLUMNS = [
     ("queue_items", "round_no", "INTEGER"),            # rotation round this song belongs to
     ("queue_items", "priority", "REAL"),               # non-NULL = plays before the round-robin, ascending
@@ -164,6 +192,9 @@ ADDED_COLUMNS = [
     # v0.7.0
     ("events", "ready_until", "REAL"),                 # the TV's "Get ready" countdown ends at this time
     ("events", "paused", "INTEGER NOT NULL DEFAULT 0"),  # "Smoke break!": the queue is on hold
+    ("queue_items", "set_id", "INTEGER"),              # a Superset song (outside the regular queue)
+    ("superset_votes", "mode", "TEXT NOT NULL DEFAULT 'after'"),
+    ("superset_votes", "item_id", "INTEGER"),
     ("queue_items", "duet_guest_id", "INTEGER"),       # second singer on a duet
     ("guests", "rejoin_code", "TEXT"),                 # lets a singer get back in on another phone
 ]

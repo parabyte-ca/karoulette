@@ -2,6 +2,7 @@
 import { expect, test } from "@playwright/test";
 
 const PIN = "2468";
+const HOST_SESSION = "e2e/.data/host.json"; // signed in once by global-setup.js
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
 let videoNo = 0;
@@ -9,9 +10,7 @@ const nextVideo = () => `e2e${String(videoNo++).padStart(8, "0")}`; // 11 charac
 
 /** A signed-in host context with a fresh event. */
 async function hostWithEvent(browser, name, config = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
-  const res = await ctx.request.post("/api/host/login", { data: { pin: PIN } });
-  expect(res.ok()).toBeTruthy();
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, storageState: HOST_SESSION });
   const ev = await (await ctx.request.post("/api/host/events", {
     data: { name, config: { superset_chance: 0, autoplay: true, ...config } },
   })).json();
@@ -106,7 +105,7 @@ test("a night out: get ready, new singer, reactions and the recap", async ({ bro
   await expect(alex.locator(".recap-me")).toContainText("You sang 1 song");
 });
 
-test("guests vote in a Superset; the host bouches a singer and calls a smoke break", async ({ browser }) => {
+test("a voted Superset set, then the host bouches a singer and calls a smoke break", async ({ browser }) => {
   const { ctx, ev, api } = await hostWithEvent(browser, "Vote Night", { ready_seconds: 0 });
   const phones = {};
   for (const name of ["Alex", "Blake", "Casey"]) {
@@ -117,22 +116,34 @@ test("guests vote in a Superset; the host bouches a singer and calls a smoke bre
   await tv.getByRole("button", { name: "Start event" }).click();
   await expect(tv.locator(".now-singing")).toContainText("Alex");
 
-  // Alex calls a Superset; the other two vote yes on their phones and the round becomes a Superset.
-  phones.Alex.on("dialog", (d) => d.accept());
+  // Alex calls a Superset kicked off by their own song; the other two vote yes on their phones.
   await phones.Alex.getByRole("button", { name: "Call a Superset" }).click();
+  await phones.Alex.locator(".chooser").getByRole("button", { name: /Start now/ }).click();
   await expect(tv.locator(".vote-panel")).toContainText("Alex");
   await expect(phones.Alex.locator(".vote-card")).toContainText("waiting for votes");
   await phones.Blake.getByRole("button", { name: "Yes!" }).click();
   await expect(tv.locator(".vote-panel")).toContainText("Yes 1");
   await phones.Casey.getByRole("button", { name: "Yes!" }).click();
   await expect(tv.locator(".superset-flash")).toContainText("SUPERSET!");
-  await expect(tv.locator(".superset-tag")).toBeVisible();
-  await expect(phones.Blake.locator(".superset-banner")).toBeVisible();
-  await expect(tv.locator(".vote-panel")).toBeHidden();
+  await expect(tv.locator(".superset-panel")).toContainText("Songs like “Alex's song”");
+  await expect(tv.locator(".superset-panel .set-slot").first()).toContainText("Alex");
+  await expect(phones.Blake.locator(".set-card")).toContainText("your next pick is your Superset song");
+
+  // Alex's song was the first of the set; the TV waits for Blake (next in the order) to pick.
+  await finishSong(api, ev);
+  await expect(tv.locator(".set-waiting")).toContainText("Waiting for Blake");
+  await expect(phones.Blake.locator(".set-card")).toContainText("It's your turn!");
+  await queue(phones.Blake, "Blake's Superset song");
+  await expect(tv.locator(".now-singing")).toContainText("Blake's Superset song");
+  phones.Casey.on("dialog", (d) => d.accept());
+  await phones.Casey.getByRole("button", { name: "Sit this one out" }).click();
+  await finishSong(api, ev); // set done: the queue carries on where it left off
+  await expect(tv.locator(".superset-panel")).toBeHidden();
+  await expect(tv.locator(".now-singing")).toContainText("Blake's song");
 
   // Bouche! from Host admin: Casey's out, and the TV makes sure everyone knows.
   let caseyAlert = "";
-  phones.Casey.on("dialog", (d) => { caseyAlert = d.message(); d.accept(); });
+  phones.Casey.on("dialog", (d) => { caseyAlert = d.message(); });
   const admin = await ctx.newPage();
   admin.on("dialog", (d) => d.accept());
   await admin.goto("/host/admin");
@@ -146,11 +157,11 @@ test("guests vote in a Superset; the host bouches a singer and calls a smoke bre
   await tv.getByRole("button", { name: "Pause queue" }).click();
   await expect(tv.locator(".smoke-break")).toContainText("Smoke break!");
   await expect(phones.Blake.locator(".smoke-banner")).toBeVisible();
-  expect((await state(api, ev)).queue[0].guest_name).toBe("Alex");
+  expect((await state(api, ev)).queue[0].guest_name).toBe("Blake");
   await tv.mouse.move(800, 880);
   await tv.getByRole("button", { name: "Resume queue" }).click();
   await expect(tv.locator(".smoke-break")).toBeHidden();
-  await expect(tv.locator(".now-singing")).toContainText("Alex");
+  await expect(tv.locator(".now-singing")).toContainText("Blake");
 });
 
 test("duets show both singers and reach the partner's phone", async ({ browser }) => {
@@ -237,4 +248,24 @@ test("installable app and colour schemes", async ({ browser, request }) => {
   await api.put("/api/host/appearance", { data: { scheme: "disco" } });
   await expect(phone.locator("html")).toHaveAttribute("data-scheme", "disco");
   await api.put("/api/host/appearance", { data: { scheme: "neon" } });
+});
+
+test("admin, event list and remote fit a phone screen", async ({ browser }) => {
+  const { ev } = await hostWithEvent(browser, "Phone Admin Night");
+  const ctx = await browser.newContext({ viewport: { width: 360, height: 800 }, isMobile: true, hasTouch: true,
+    storageState: HOST_SESSION });
+  const page = await ctx.newPage();
+  const fits = async () => expect(await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  for (const tab of ["Events", "Themes", "YouTube", "Appearance", "Updates", "Security"]) {
+    await page.goto("/host/admin");
+    await page.getByRole("button", { name: tab, exact: true }).click();
+    await page.waitForTimeout(300);
+    await fits();
+  }
+  for (const path of ["/host", `/host/remote/${ev.id}`]) {
+    await page.goto(path);
+    await page.waitForLoadState("networkidle");
+    await fits();
+  }
 });
