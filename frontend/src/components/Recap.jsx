@@ -13,6 +13,8 @@ export default function Recap({ recap, eventName, me = null, size = "tv" }) {
   if (recap.superset_rounds) tiles.push([recap.superset_rounds, recap.superset_rounds === 1 ? "Superset" : "Supersets"]);
   const mine = me ? recap.per_singer?.[me] || 0 : null;
   const highlights = [
+    recap.crowd_favourite && ["🔥 Crowd favourite", `${recap.crowd_favourite.singer} · ${decodeEntities(recap.crowd_favourite.title)} (${recap.crowd_favourite.cheers} cheers)`],
+    recap.most_cheered && ["📣 Most cheered singer", `${recap.most_cheered.singer} (${recap.most_cheered.cheers} cheers)`],
     recap.top_singers.length > 0 && ["🏆 Most songs", `${recap.top_singers.join(", ")} (${recap.top_count})`],
     recap.top_themes.length > 0 && ["🎰 Top themes", recap.top_themes.join(", ")],
     recap.superset_stars.length > 0 && ["★ Superset stars", recap.superset_stars.join(", ")],

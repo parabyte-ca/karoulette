@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS queue_items (
     played_at REAL
 );
 CREATE INDEX IF NOT EXISTS ix_queue_event ON queue_items(event_id, status, position);
+CREATE INDEX IF NOT EXISTS ix_queue_guest ON queue_items(guest_id, status);
 
 CREATE TABLE IF NOT EXISTS flags (
     queue_item_id INTEGER NOT NULL REFERENCES queue_items(id) ON DELETE CASCADE,
@@ -156,6 +157,7 @@ CREATE TABLE IF NOT EXISTS superset_slots (
     item_id INTEGER REFERENCES queue_items(id) ON DELETE SET NULL,
     PRIMARY KEY (set_id, guest_id)
 );
+CREATE INDEX IF NOT EXISTS ix_slots_item ON superset_slots(item_id);
 
 CREATE TABLE IF NOT EXISTS search_cache (
     query_key TEXT PRIMARY KEY,
@@ -195,6 +197,10 @@ ADDED_COLUMNS = [
     ("queue_items", "set_id", "INTEGER"),              # a Superset song (outside the regular queue)
     ("superset_votes", "mode", "TEXT NOT NULL DEFAULT 'after'"),
     ("superset_votes", "item_id", "INTEGER"),
+    # v0.8.0
+    ("queue_items", "cheers", "INTEGER NOT NULL DEFAULT 0"),  # reactions sent while it played
+    ("themes", "ideas", "TEXT NOT NULL DEFAULT ''"),          # comma-separated search ideas for phones
+    ("events", "last_call_announced", "INTEGER NOT NULL DEFAULT 0"),
     ("queue_items", "duet_guest_id", "INTEGER"),       # second singer on a duet
     ("guests", "rejoin_code", "TEXT"),                 # lets a singer get back in on another phone
 ]
@@ -211,12 +217,17 @@ class Database:
         self.conn.execute("PRAGMA foreign_keys = ON")
         if self.path != ":memory:":
             self.conn.execute("PRAGMA journal_mode = WAL")
-        self.conn.executescript(SCHEMA)
-        self._add_missing_columns()
+        self.migrate()
         self.execute(
             "INSERT OR IGNORE INTO settings(key, value) VALUES ('schema_version', ?)",
             (json.dumps(SCHEMA_VERSION),),
         )
+
+    def migrate(self) -> None:
+        """Create anything missing: run at start-up and after restoring an older backup."""
+        with self._lock:
+            self.conn.executescript(SCHEMA)
+            self._add_missing_columns()
 
     def _add_missing_columns(self) -> None:
         """Bring databases created by older versions up to date (SQLite only needs ADD COLUMN here)."""

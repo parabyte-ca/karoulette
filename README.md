@@ -1,7 +1,7 @@
 # Karoulette
 > Karaoke meets roulette. Self-hosted, multi-user karaoke night: guests join by QR code, queue YouTube karaoke videos from their phones, and sing one song per round in a fair rotation while a theme roulette spins each round.
 
-![Version](https://img.shields.io/badge/version-0.7.0-blue)
+![Version](https://img.shields.io/badge/version-0.8.0-blue)
 
 ## Overview
 Karoulette runs your karaoke party from one TV and everyone's phones. The TV (host screen) plays YouTube karaoke videos through the official YouTube player in a browser signed into YouTube Premium, so there are no ads. Guests scan a QR code, pick a display name and add as many songs as they like; the queue plays one song per singer per round, and each round spins a theme for everyone's picks. Everything syncs in real time and survives a container restart.
@@ -16,8 +16,10 @@ Karoulette runs your karaoke party from one TV and everyone's phones. The TV (ho
 - **Guest phone UI** (`/join`): mobile-first, no accounts (session token in `localStorage`), song search that's always open, "My songs" with each song's place in the queue and an **estimated wait** ("≈ 8 min"), the round's theme, full queue and singer order.
 - **Nearly-up alerts**: phones show and vibrate "two songs to go", "you're up next" and "you're up!". Tap **🔔 Buzz me when I'm nearly up** for system notifications while the phone is locked or on another app (needs HTTPS; on iPhone, install the app first).
 - **Duets**: when adding a song, pick "As a duet with …" to sing it with another guest. Both names show on the TV, both phones get the alerts, and the partner can step out. The song counts as the picker's turn.
-- **Crowd reactions**: while someone sings, phones get a row of 👏 🔥 😂 ❤️ 🎉 🤘 buttons; each tap floats up the TV with the sender's name (rate limited, never stored).
-- **End-of-night recap** on the TV and every phone: songs sung, singers, minutes of music, rounds, duets, most songs, top themes, Superset stars, who opened and closed the night, and each guest's own count.
+- **Crowd reactions and the crowd meter**: while someone sings, phones get a row of 👏 🔥 😂 ❤️ 🎉 🤘 buttons; each tap floats up the TV with the sender's name and fills the 🔥 **crowd meter** beside the song (rate limited).
+- **End-of-night recap** on the TV and every phone: songs sung, singers, minutes of music, rounds, duets, the **crowd favourite** (most-cheered song) and **most cheered singer**, most songs, top themes, Superset stars, who opened and closed the night, and each guest's own count.
+- **Last call** (optional): set a closing time per event. The TV shows "Closing 11:30 p.m. · room for about 3 more songs"; once the queue would run past it, new songs (and guest Supersets) are refused, and everyone's told "Last call!".
+- **Need ideas?** Themes carry search ideas (artists or songs; the starter themes come with some). Phones show them as buttons under the round's theme and on Superset turns; a "Songs like ⟨song⟩" Superset suggests that song's artist and title.
 - **Rejoin code**: each guest gets a six-character code (bottom of their phone screen, and beside their name in Host admin). On a new phone, "Switched phones? Rejoin with your code" brings back their name, place and songs, and signs the old phone out.
 - **Installable app**: phones can add Karoulette to the home screen (web app manifest, icons and a small service worker that never caches live data). Needs HTTPS, e.g. through your reverse proxy.
 - **Add songs any time, as many as you like**: no waiting for a turn. The queue is a fair round-robin: each singer gets one song per round, and every round follows the singer order. A singer with five songs queued sings one per round, interleaved with everyone else.
@@ -35,6 +37,8 @@ Karoulette runs your karaoke party from one TV and everyone's phones. The TV (ho
 - **Multiple events** with a start/end lifecycle and a short join code. Song history per event with **CSV export**.
 - **Duplicate prevention** per event (host-configurable).
 - **Six colour schemes**, switchable live from Host admin → Appearance (TV, phones and admin repaint instantly, even mid-event): **Neon Night** (original), **On Air** (broadcast studio), **Synthwave Sunset** (80s outrun), **Velvet Lounge** (jazz club), **Northern Lights** (Canadian aurora) and **Mirror Ball** (70s disco, with light flecks sweeping the room). Each has its own background art and display font, and all stay dark and high-contrast.
+- **Backups in Host admin**: make and download a backup any time, restore one from the list (including the automatic pre-upgrade backups) or from a file. The current database is saved first, so a restore can be undone.
+- **Health check** at `/api/health` that checks the database (for Docker and monitors like Uptime Kuma; see below).
 - **Updates from the admin page** (same model as project-glasshaus): a daily check for new GitHub releases, the running version and any new release shown in Host admin, release notes, and a one-click **Upgrade** that a small host helper carries out with a database backup, health check and automatic rollback.
 - **Security**: host PIN (PBKDF2-hashed, HttpOnly signed session cookie), rate-limited search/join/login, validated inputs, API key never sent to browsers.
 - Automated tests: backend unit and API tests, plus **browser tests** (Playwright) that drive a TV, phones and the host remote against a real server on every pull request. Demo seed script included.
@@ -108,13 +112,16 @@ All settings live in `.env` (see `.env.example`).
 | `SOURCE_REPO` | `parabyte-ca/karoulette` | GitHub repository releases are checked against |
 | `KQ_UPGRADE_FOLDER` | `./upgrade` | Host folder shared with the upgrade helper |
 | `KQ_IMAGE` / `KQ_TAG` | `parabyte-ca/karoulette` / `latest` | Image to run |
-| `TZ` | `America/Toronto` | Container time zone |
+| `TZ` | `America/Toronto` | Container time zone (last call times use it) |
+| `STATE_COALESCE_MS` | `60` | How long the server gathers a burst of changes before sending everyone one update |
 
-**Per-event settings** (Host admin → Events): **themes on/off** (default off), random Superset chance per round (default 0 %), Superset vote length (default 60 s), recent-theme window (default 3), prevent duplicate songs (default on), SafeSearch (off / moderate / strict), longest video allowed (default 15 min), autoplay, **"Get ready" countdown** (default 5 s, 0 = off) and **songs each singer can have waiting** (default 0 = no limit).
+**Per-event settings** (Host admin → Events): **themes on/off** (default off), random Superset chance per round (default 0 %), Superset vote length (default 60 s), recent-theme window (default 3), prevent duplicate songs (default on), SafeSearch (off / moderate / strict), longest video allowed (default 15 min), autoplay, **"Get ready" countdown** (default 5 s, 0 = off) and **songs each singer can have waiting** (default 0 = no limit) and **last call** (a closing time, blank = none).
 
 **Quota maths**: a new search costs about 101 units (100 for `search.list` + 1 for `videos.list`), so the default 10,000-unit daily quota covers roughly 99 fresh searches; repeated searches within 24 hours are served from the cache for free. Quota resets at midnight Pacific time.
 
-**Reverse proxy** (Nginx Proxy Manager, Cloudflare Tunnel): enable **WebSockets support**, forward to `http://<nas-ip>:8095`, and set `PUBLIC_BASE_URL` so the QR code uses the public address.
+**Reverse proxy** (Nginx Proxy Manager, Cloudflare Tunnel): enable **WebSockets support**, forward to `http://<nas-ip>:8095`, and set `PUBLIC_BASE_URL` so the QR code uses the public address. Make sure the proxy passes `X-Forwarded-For` (both do by default): join and search limits are per guest address.
+
+**Monitoring with Uptime Kuma**: add a monitor of type **HTTP(s) - Keyword**, URL `http://<nas-ip>:8095/api/health`, keyword `"status":"ok"`, interval 60 seconds. It returns 200 only when the app and its database answer, and 503 otherwise. The response also lists the version, active events and live connections (or use a **HTTP(s) - Json Query** monitor with `status` = `ok`). Docker's own health check uses the same endpoint.
 
 ## Usage
 
@@ -134,6 +141,7 @@ All settings live in `.env` (see `.env.example`).
 - **YouTube**: search mode and estimated quota left today.
 - **Appearance**: live mini-mockups of each colour scheme; one click switches every screen.
 - **Updates**: running version, latest release and notes, check now, one-click upgrade with live progress and log.
+- **Backups**: make and download a backup, restore from the list or a file, delete old ones.
 - **Security**: change the PIN (when not set by `HOST_PIN`), sign out.
 
 ### Demo data
@@ -157,7 +165,7 @@ Creates a "Demo Night" event with six guests, a few queued songs and history, an
             └─ SQLite (WAL) in /data  ·  serves the built React SPA
 ```
 
-- **Backend** (`backend/app`): `engine.py` is the only place event state changes; every mutation runs under one asyncio lock, is written to SQLite, and pushes typed messages (`guest_joined`, `new_singer`, `theme_spun`, `song_queued`, `now_playing`, `round_changed`, `superset`, `superset_vote`, `bouched`, `queue_paused`, `notice`…) followed by a full `state` snapshot. `logic.py` holds the pure ordering/theme/Superset rules that the tests target: each song is tagged with the round it belongs to (`assign_round`), and the queue is sorted by priority, round, then the singer's place in the order (`play_order`), so the order is always derived from data that survives a restart. `vote_outcome` decides Superset votes and `set_order` lays out a Superset's turns; a one-second server tick closes votes whose time is up. A Superset's songs (`queue_items.set_id`) sit outside the regular queue until the set is done.
+- **Backend** (`backend/app`): the `engine` package is the only place event state changes. It's one `Engine` class built from a mixin per area: `events`, `guests`, `themes`, `queue`, `playback`, `supersets`, `lastcall` and `views` (snapshot, recap, CSV). Every mutation runs under one asyncio lock, is written to SQLite, and pushes typed messages (`guest_joined`, `new_singer`, `theme_spun`, `song_queued`, `now_playing`, `round_changed`, `superset`, `superset_vote`, `bouched`, `queue_paused`, `last_call`, `notice`…). The full `state` snapshot follows once per burst of changes (`STATE_COALESCE_MS`), so thirty phones queuing at once cost a handful of updates, not thirty. Reactions go only to the TV and remote, with no snapshot. `logic.py` holds the pure ordering/theme/Superset rules that the tests target: each song is tagged with the round it belongs to (`assign_round`), and the queue is sorted by priority, round, then the singer's place in the order (`play_order`), so the order is always derived from data that survives a restart. `vote_outcome` decides Superset votes and `set_order` lays out a Superset's turns; a one-second server tick closes votes whose time is up. A Superset's songs (`queue_items.set_id`) sit outside the regular queue until the set is done.
 - **Frontend** (`frontend/src`): React + Vite, no UI framework. `HostScreen` (TV), `HostRemote` (host's phone), `HostAdmin`, `JoinApp` (guest phone). `useEventSocket` reconnects with backoff and corrects for clock skew. `public/` holds the web app manifest, icons and service worker (`sw.js`, version-stamped by the server).
 - **YouTube**: playback only through the official IFrame Player on the host page; nothing is downloaded, proxied or ripped. Ad-free playback relies on the TV browser's Premium sign-in. Guests never play video.
 - **Data model**: `events`, `guests`, `themes`, `rounds`, `turns` (theme history), `queue_items` (song history), `flags`, `search_cache`, `video_cache`, `quota_ledger`, `settings`. See [`docs/PLAN.md`](docs/PLAN.md).
@@ -177,9 +185,14 @@ cd frontend && npm install && npm run dev
 # Browser tests (starts its own server on :8097 with a throwaway database)
 cd frontend && npm run build && npx playwright install chromium
 KQ_PYTHON=../backend/.venv/bin/python npm run test:e2e
+
+# Load test: 30 phones join, queue and cheer at once against a running test server
+cd backend && python -m scripts.loadtest --base http://127.0.0.1:8095 --pin 1234
 ```
 
-CI (`.github/workflows/docker.yml`) runs the backend tests, the frontend build and the browser tests, then builds a multi-arch image and pushes `ghcr.io/parabyte-ca/karoulette:<version>` and `:latest` on `main` (and `:<semver>` on `v*` tags).
+The frontend loads the host pages (TV, remote, admin) only when they're opened, and keeps React in its own long-cached file, so guests' phones download less and re-download only the app code after an upgrade.
+
+CI (`.github/workflows/docker.yml`) runs the backend tests, the frontend build, the browser tests and the load test (fails if a request type's p95 passes 750 ms or an update takes over 1.5 s to reach every phone), then builds a multi-arch image and pushes `ghcr.io/parabyte-ca/karoulette:<version>` and `:latest` on `main` (and `:<semver>` on `v*` tags).
 
 ## Changelog
 See [CHANGELOG.md](CHANGELOG.md).

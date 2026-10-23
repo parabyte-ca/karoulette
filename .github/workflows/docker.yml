@@ -77,8 +77,33 @@ jobs:
             frontend/test-results/
           retention-days: 7
 
+  load:
+    # 30 phones join, queue and cheer at once; fails if requests or updates get slow.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Backend packages
+        run: pip install -r backend/requirements.txt
+      - name: Load test
+        working-directory: backend
+        env:
+          DATA_PATH: ${{ runner.temp }}/karoulette-load
+          STATIC_DIR: ${{ runner.temp }}/no-frontend
+          HOST_PIN: "2468"
+          ENABLE_YTDLP: "false"
+          UPDATE_CHECK: "false"
+        run: |
+          python -m uvicorn --factory app.main:create_app --host 127.0.0.1 --port 8095 > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8095/api/health >/dev/null && break; sleep 1; done
+          python -m scripts.loadtest --base http://127.0.0.1:8095 --pin 2468 || { cat server.log; exit 1; }
+
   docker:
-    needs: [test, e2e]
+    needs: [test, e2e, load]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

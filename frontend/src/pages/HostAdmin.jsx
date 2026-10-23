@@ -4,12 +4,14 @@ import { api } from "../lib/api";
 import { Toasts, useToasts } from "../components/Toasts";
 import UpdatesTab from "./UpdatesTab";
 import AppearanceTab from "./AppearanceTab";
+import BackupsTab from "./BackupsTab";
 
-const TABS = [["events", "Events"], ["themes", "Themes"], ["youtube", "YouTube"], ["appearance", "Appearance"], ["updates", "Updates"], ["security", "Security"]];
+const TABS = [["events", "Events"], ["themes", "Themes"], ["youtube", "YouTube"], ["appearance", "Appearance"], ["updates", "Updates"], ["backups", "Backups"], ["security", "Security"]];
 
 function ThemesTab({ push }) {
   const [themes, setThemes] = useState([]);
-  const [draft, setDraft] = useState({ name: "", description: "", weight: 1, enabled: true });
+  const blank = { name: "", description: "", ideas: "", weight: 1, enabled: true };
+  const [draft, setDraft] = useState(blank);
   const [editing, setEditing] = useState(null);
 
   const load = () => api("/api/host/themes").then(setThemes).catch((e) => push(e.message, "error"));
@@ -19,9 +21,10 @@ function ThemesTab({ push }) {
     try {
       await api(id ? `/api/host/themes/${id}` : "/api/host/themes", {
         method: id ? "PUT" : "POST",
-        body: { ...theme, weight: Number(theme.weight) || 0 },
+        body: { ...theme, weight: Number(theme.weight) || 0,
+          ideas: Array.isArray(theme.ideas) ? theme.ideas.join(", ") : theme.ideas || "" },
       });
-      if (!id) setDraft({ name: "", description: "", weight: 1, enabled: true });
+      if (!id) setDraft(blank);
       setEditing(null);
       push(id ? "Theme saved." : "Theme added.", "success");
       load();
@@ -40,14 +43,17 @@ function ThemesTab({ push }) {
       <h2>Themes</h2>
       <p className="muted">Themes are switched on per event (Host admin → Events). When they're on, each round spins one theme
         as a suggestion; when they're off, singers pick freely. Supersets spin from this list too. Weight makes a theme
-        more (or less) likely to come up. Disabled themes are never spun.</p>
+        more (or less) likely to come up. Disabled themes are never spun. Search ideas show on phones as
+        “Need ideas?” buttons.</p>
       <table className="table">
-        <thead><tr><th>Name</th><th>Description</th><th>Weight</th><th>Enabled</th><th /></tr></thead>
+        <thead><tr><th>Name</th><th>Description</th><th>Search ideas</th><th>Weight</th><th>Enabled</th><th /></tr></thead>
         <tbody>
           {themes.map((t) => (editing?.id === t.id ? (
             <tr key={t.id}>
               <td data-label="Name"><input value={editing.name} maxLength={60} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></td>
               <td data-label="Description"><input value={editing.description} maxLength={280} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></td>
+              <td data-label="Ideas"><input value={editing.ideas} maxLength={300} placeholder="Artists or songs, comma-separated"
+                                             onChange={(e) => setEditing({ ...editing, ideas: e.target.value })} /></td>
               <td data-label="Weight"><input type="number" min="0" max="100" step="0.5" value={editing.weight}
                          onChange={(e) => setEditing({ ...editing, weight: e.target.value })} /></td>
               <td data-label="Enabled"><input type="checkbox" checked={editing.enabled} onChange={(e) => setEditing({ ...editing, enabled: e.target.checked })} /></td>
@@ -60,13 +66,14 @@ function ThemesTab({ push }) {
             <tr key={t.id} className={t.enabled ? "" : "disabled"}>
               <td data-label="Name"><strong>{t.name}</strong></td>
               <td data-label="Description" className="muted">{t.description}</td>
+              <td data-label="Ideas" className="muted small">{t.ideas.join(", ")}</td>
               <td data-label="Weight">{t.weight}</td>
               <td data-label="Enabled">
                 <input type="checkbox" checked={t.enabled} aria-label={`Enable ${t.name}`}
                        onChange={(e) => save({ ...t, enabled: e.target.checked }, t.id)} />
               </td>
               <td className="actions">
-                <button className="btn" onClick={() => setEditing({ ...t })}>Edit</button>
+                <button className="btn" onClick={() => setEditing({ ...t, ideas: t.ideas.join(", ") })}>Edit</button>
                 <button className="btn btn-danger" onClick={() => remove(t)}>Delete</button>
               </td>
             </tr>
@@ -79,6 +86,8 @@ function ThemesTab({ push }) {
                onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
         <input placeholder="Description (optional)" value={draft.description} maxLength={280}
                onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+        <input placeholder="Search ideas, e.g. ABBA, Bee Gees (optional)" value={draft.ideas} maxLength={300}
+               onChange={(e) => setDraft({ ...draft, ideas: e.target.value })} />
         <label className="inline">Weight
           <input type="number" min="0" max="100" step="0.5" value={draft.weight}
                  onChange={(e) => setDraft({ ...draft, weight: e.target.value })} />
@@ -173,6 +182,7 @@ function EventSettings({ eventId, push, onChanged }) {
           {field("ready_seconds", "“Get ready” countdown before each song (seconds, 0 = off)", { type: "number", min: 0, max: 60 })}
           {field("max_songs_per_singer", "Songs each singer can have waiting (0 = no limit)", { type: "number", min: 0, max: 50 })}
           {field("superset_vote_seconds", "How long a singer's Superset vote stays open (seconds)", { type: "number", min: 15, max: 300 })}
+          {field("last_call", "Last call: closing time (blank = none). Songs that would run past it are refused.", { type: "time" })}
           <label className="field"><span>Safe search</span>
             <select value={cfg.safe_search} onChange={(e) => setCfg({ ...cfg, safe_search: e.target.value })}>
               <option value="none">Off</option>
@@ -364,6 +374,7 @@ export default function HostAdmin() {
       {tab === "youtube" && <YouTubeTab push={push} />}
       {tab === "appearance" && <AppearanceTab push={push} />}
       {tab === "updates" && <UpdatesTab push={push} loadedVersion={info.version} />}
+      {tab === "backups" && <BackupsTab push={push} />}
       {tab === "security" && <SecurityTab push={push} />}
       <Toasts toasts={toasts} />
     </main>

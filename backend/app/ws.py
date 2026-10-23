@@ -45,16 +45,16 @@ class Hub:
 
     async def send_screens(self, event_id: int, message: dict) -> None:
         """Only to host connections (the TV and the host remote)."""
-        text = json.dumps(message)
+        text = json.dumps(message, ensure_ascii=False, separators=(",", ":"))
         targets = [c for c in list(self.rooms.get(event_id, ())) if c.role in ("host", "screen")]
         await asyncio.gather(*(self._send(event_id, c, text) for c in targets))
 
     async def send(self, event_id: int, message: dict, guest_id: int | None = None) -> None:
-        text = json.dumps(message)
+        text = json.dumps(message, ensure_ascii=False, separators=(",", ":"))
         targets = [c for c in list(self.rooms.get(event_id, ()))
                    if guest_id is None or c.guest_id == guest_id or c.role in ("host", "screen")]
         if guest_id is not None:
             # Personal messages go to the guest; host screens get them too, tagged.
             message = {**message, "for_guest_id": guest_id}
-            text = json.dumps(message)
+            text = json.dumps(message, ensure_ascii=False, separators=(",", ":"))
         await asyncio.gather(*(self._send(event_id, c, text) for c in targets))

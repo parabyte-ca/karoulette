@@ -29,8 +29,14 @@ async function openTv(ctx, ev) {
   return tv;
 }
 
+let phoneNo = 0;
+/** A phone context with its own address, as on real Wi-Fi (the join limit is per address). */
+const phoneContext = (browser) => browser.newContext({
+  ...PHONE, extraHTTPHeaders: { "X-Forwarded-For": `10.20.${Math.floor(phoneNo / 250)}.${(phoneNo++ % 250) + 1}` },
+});
+
 async function joinPhone(browser, ev, name) {
-  const ctx = await browser.newContext(PHONE);
+  const ctx = await phoneContext(browser);
   const page = await ctx.newPage();
   await page.goto(`/join/${ev.join_code}`);
   await page.getByPlaceholder("What should the TV call you?").fill(name);
@@ -201,7 +207,7 @@ test("rejoin on a new phone keeps your place and signs the old phone out", async
   let signedOut = "";
   oldPhone.on("dialog", (d) => { signedOut = d.message(); d.accept(); });
 
-  const ctx = await browser.newContext(PHONE);
+  const ctx = await phoneContext(browser);
   const newPhone = await ctx.newPage();
   await newPhone.goto(`/join/${ev.join_code}`);
   await newPhone.getByRole("button", { name: /Switched phones/ }).click();
@@ -268,4 +274,70 @@ test("admin, event list and remote fit a phone screen", async ({ browser }) => {
     await page.waitForLoadState("networkidle");
     await fits();
   }
+});
+
+test("crowd meter, last call and the recap's crowd favourite", async ({ browser }) => {
+  const soon = new Date(Date.now() + 9 * 60 * 1000); // room for about two 4-minute songs
+  const lastCall = `${String(soon.getHours()).padStart(2, "0")}:${String(soon.getMinutes()).padStart(2, "0")}`;
+  const { ctx, ev, api } = await hostWithEvent(browser, "Cheer Night", { ready_seconds: 0, last_call: lastCall });
+  const alex = await joinPhone(browser, ev, "Alex");
+  const blake = await joinPhone(browser, ev, "Blake");
+  await queue(alex, "Alex's song");
+  const tv = await openTv(ctx, ev);
+  await expect(tv.locator(".last-call-tag")).toContainText("room for about");
+  await tv.getByRole("button", { name: "Start event" }).click();
+  await expect(tv.locator(".now-singing")).toContainText("Alex's song");
+
+  // Cheers fill the crowd meter on the TV.
+  for (const e of ["🔥", "👏", "🎉"]) {
+    await blake.getByRole("button", { name: `Send ${e}` }).click();
+    await blake.waitForTimeout(400);
+  }
+  await expect(tv.locator(".crowd-meter")).toContainText("3");
+
+  // Last call: songs that would run past closing time are refused, and the TV says so.
+  let status = 200;
+  for (let i = 0; i < 4 && status === 200; i += 1) {
+    status = await blake.evaluate(async (videoId) => (await fetch("/api/guest/queue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("kq_token")}` },
+      body: JSON.stringify({ video_id: videoId }),
+    })).status, nextVideo());
+  }
+  expect(status).toBe(409);
+  await expect(tv.locator(".last-call-tag.closed")).toContainText("Last call!");
+  await expect(blake.locator(".card .warning")).toContainText("Last call has passed");
+
+  tv.on("dialog", (d) => d.accept());
+  await tv.mouse.move(800, 880);
+  await tv.getByRole("button", { name: "End event" }).click();
+  await expect(tv.locator(".recap")).toContainText("Crowd favourite");
+  await expect(tv.locator(".recap")).toContainText("Alex · Alex's song (3 cheers)");
+  expect((await state(api, ev)).recap.most_cheered.singer).toBe("Alex");
+});
+
+test("Superset ideas on phones and backups in Host admin", async ({ browser }) => {
+  const { ctx, ev, api } = await hostWithEvent(browser, "Ideas Night", { ready_seconds: 0 });
+  const alex = await joinPhone(browser, ev, "Alex");
+  const blake = await joinPhone(browser, ev, "Blake");
+  await queue(alex, "Toto - Africa (Karaoke Version)");
+  await api.post(`/api/host/events/${ev.id}/actions/start`);
+  await api.post(`/api/host/events/${ev.id}/actions/superset-now`);
+  // "Songs like Africa": Blake's phone suggests searches from the song that kicked it off.
+  await expect(blake.locator(".set-card .idea-chip")).toHaveText(["Toto", "Africa"]);
+
+  // Backups: make one, change something, restore it.
+  const admin = await ctx.newPage();
+  admin.on("dialog", (d) => d.accept());
+  await admin.goto("/host/admin");
+  await admin.getByRole("button", { name: "Backups", exact: true }).click();
+  const made = await (await api.post("/api/host/backups")).json();
+  await api.post("/api/host/events", { data: { name: "Made after the backup" } });
+  await admin.reload();
+  await admin.getByRole("button", { name: "Backups", exact: true }).click();
+  await admin.locator(".list-row", { hasText: made.name }).getByRole("button", { name: "Restore" }).click();
+  await expect(admin.locator(".toast")).toContainText("Restored");
+  const names = (await (await api.get("/api/host/events")).json()).map((e) => e.name);
+  expect(names).not.toContain("Made after the backup");
+  expect(names).toContain("Ideas Night");
 });
