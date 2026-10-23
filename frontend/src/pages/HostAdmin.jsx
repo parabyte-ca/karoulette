@@ -118,6 +118,7 @@ function EventSettings({ eventId, push, onChanged }) {
             recent_theme_window: Number(cfg.recent_theme_window),
             max_duration_s: Number(cfg.max_duration_s),
             ready_seconds: Number(cfg.ready_seconds),
+            superset_vote_seconds: Number(cfg.superset_vote_seconds),
             max_songs_per_singer: Number(cfg.max_songs_per_singer),
           },
         },
@@ -131,7 +132,7 @@ function EventSettings({ eventId, push, onChanged }) {
   };
 
   const guestAction = async (g, action) => {
-    if (action === "remove" && !window.confirm(`Remove ${g.name}? Their queued songs are removed too.`)) return;
+    if (action === "remove" && !window.confirm(`Bouche ${g.name}? Their queued songs go too, and the TV lets everyone know.`)) return;
     try {
       await api(`/api/host/events/${eventId}/guests/${g.id}/${action}`, { method: "POST" });
       load();
@@ -165,11 +166,12 @@ function EventSettings({ eventId, push, onChanged }) {
         <div className="grid">
           <label className="field"><span>Event name</span>
             <input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} /></label>
-          {field("superset_chance", "Superset chance per round (%)", { type: "number", min: 0, max: 100 })}
+          {field("superset_chance", "Random Superset chance per round (%)", { type: "number", min: 0, max: 100 })}
           {field("recent_theme_window", "Avoid themes used in the last N rounds", { type: "number", min: 0, max: 20 })}
           {field("max_duration_s", "Longest video allowed (seconds, 0 = no limit)", { type: "number", min: 0, max: 3600 })}
           {field("ready_seconds", "“Get ready” countdown before each song (seconds, 0 = off)", { type: "number", min: 0, max: 60 })}
           {field("max_songs_per_singer", "Songs each singer can have waiting (0 = no limit)", { type: "number", min: 0, max: 50 })}
+          {field("superset_vote_seconds", "How long a singer's Superset vote stays open (seconds)", { type: "number", min: 15, max: 300 })}
           <label className="field"><span>Safe search</span>
             <select value={cfg.safe_search} onChange={(e) => setCfg({ ...cfg, safe_search: e.target.value })}>
               <option value="none">Off</option>
@@ -193,7 +195,7 @@ function EventSettings({ eventId, push, onChanged }) {
       <section className="card">
         <h2>Singer order ({state.guests.length})</h2>
         <p className="muted small">Songs play one per singer per round, in this order. New singers who join mid-event
-          are slotted in right after whoever is singing. A singer who switches phones can rejoin with the code shown
+          go to the end of the order. A singer who switches phones can rejoin with the code shown
           beside their name.</p>
         {!state.guests.length && <p className="muted">Nobody has joined yet.</p>}
         <ol className="list">
@@ -211,7 +213,7 @@ function EventSettings({ eventId, push, onChanged }) {
                         onClick={() => guestAction(g, "up")}>▲</button>
                 <button className="btn" title="Later in the order" disabled={idx === state.guests.length - 1}
                         onClick={() => guestAction(g, "down")}>▼</button>
-                <button className="btn btn-danger" onClick={() => guestAction(g, "remove")}>Remove</button>
+                <button className="btn btn-danger" title="Remove this singer from the event" onClick={() => guestAction(g, "remove")}>Bouche!</button>
               </span>
             </li>
           ))}

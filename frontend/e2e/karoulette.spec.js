@@ -23,6 +23,7 @@ async function openTv(ctx, ev) {
   const tv = await ctx.newPage();
   await tv.route(/youtube\.com|ytimg\.com|googlevideo\.com/, (route) => route.abort());
   await tv.goto(`/host/event/${ev.id}`);
+  await expect(tv.locator(".checks input")).toHaveCount(4); // the sign-in check runs first
   for (const box of await tv.locator(".checks input").all()) await box.check();
   await tv.getByRole("button", { name: "Continue" }).click();
   await expect(tv.locator(".join-card")).toBeVisible();
@@ -79,14 +80,17 @@ test("a night out: get ready, new singer, reactions and the recap", async ({ bro
   await blake.getByRole("button", { name: "Send 🔥" }).click();
   await expect(tv.locator(".reaction")).toContainText("Blake");
 
-  // Dana joins mid-song: slotted in next, then announced as a new singer.
+  // Dana joins mid-song: no jumping the line. She goes to the end of the singer order (after Blake,
+  // before Alex's second song) and is announced as a new singer when her first song comes up.
   const dana = await joinPhone(browser, ev, "Dana");
   await queue(dana, "Ironic");
-  await expect(tv.locator(".queue-item").first()).toContainText("Dana");
-  await expect(tv.locator(".queue-item").first().locator(".new-tag")).toBeVisible();
-  await finishSong(api, ev);
+  expect((await state(api, ev)).queue.map((q) => q.guest_name)).toEqual(["Blake", "Dana", "Alex"]);
+  await expect(tv.locator(".queue-item").nth(1)).toContainText("Dana");
+  await expect(tv.locator(".queue-item").nth(1).locator(".new-tag")).toBeVisible();
+  await finishSong(api, ev); // Alex done, Blake up
+  await finishSong(api, ev); // Blake done, Dana's debut
   await expect(tv.locator(".newsinger-flash")).toContainText("Dana");
-  expect((await state(api, ev)).queue.map((q) => q.guest_name)).toEqual(["Blake", "Alex"]);
+  expect((await state(api, ev)).queue.map((q) => q.guest_name)).toEqual(["Alex"]);
 
   // Phones show a wait estimate for each queued song.
   await alex.getByRole("button", { name: /My songs/ }).click();
@@ -97,9 +101,56 @@ test("a night out: get ready, new singer, reactions and the recap", async ({ bro
   await tv.mouse.move(800, 880);
   await tv.getByRole("button", { name: "End event" }).click();
   await expect(tv.locator(".recap")).toContainText("That's a wrap");
-  // Alex's first song, plus Dana's, which was on when the host ended the night.
-  await expect(tv.locator(".recap-tile").first()).toHaveText(/^2\s*songs sung$/);
+  // Alex's and Blake's songs, plus Dana's, which was on when the host ended the night.
+  await expect(tv.locator(".recap-tile").first()).toHaveText(/^3\s*songs sung$/);
   await expect(alex.locator(".recap-me")).toContainText("You sang 1 song");
+});
+
+test("guests vote in a Superset; the host bouches a singer and calls a smoke break", async ({ browser }) => {
+  const { ctx, ev, api } = await hostWithEvent(browser, "Vote Night", { ready_seconds: 0 });
+  const phones = {};
+  for (const name of ["Alex", "Blake", "Casey"]) {
+    phones[name] = await joinPhone(browser, ev, name);
+    await queue(phones[name], `${name}'s song`);
+  }
+  const tv = await openTv(ctx, ev);
+  await tv.getByRole("button", { name: "Start event" }).click();
+  await expect(tv.locator(".now-singing")).toContainText("Alex");
+
+  // Alex calls a Superset; the other two vote yes on their phones and the round becomes a Superset.
+  phones.Alex.on("dialog", (d) => d.accept());
+  await phones.Alex.getByRole("button", { name: "Call a Superset" }).click();
+  await expect(tv.locator(".vote-panel")).toContainText("Alex");
+  await expect(phones.Alex.locator(".vote-card")).toContainText("waiting for votes");
+  await phones.Blake.getByRole("button", { name: "Yes!" }).click();
+  await expect(tv.locator(".vote-panel")).toContainText("Yes 1");
+  await phones.Casey.getByRole("button", { name: "Yes!" }).click();
+  await expect(tv.locator(".superset-flash")).toContainText("SUPERSET!");
+  await expect(tv.locator(".superset-tag")).toBeVisible();
+  await expect(phones.Blake.locator(".superset-banner")).toBeVisible();
+  await expect(tv.locator(".vote-panel")).toBeHidden();
+
+  // Bouche! from Host admin: Casey's out, and the TV makes sure everyone knows.
+  let caseyAlert = "";
+  phones.Casey.on("dialog", (d) => { caseyAlert = d.message(); d.accept(); });
+  const admin = await ctx.newPage();
+  admin.on("dialog", (d) => d.accept());
+  await admin.goto("/host/admin");
+  await admin.locator(".list-row", { hasText: "Casey" }).getByRole("button", { name: "Bouche!" }).click();
+  await expect(tv.locator(".bouche-flash")).toContainText("Casey has been BOUCHED!");
+  await expect.poll(() => caseyAlert).toContain("BOUCHED");
+  expect((await state(api, ev)).guests.map((g) => g.name)).toEqual(["Alex", "Blake"]);
+
+  // Smoke break: the song stops and goes back to the front; the TV and phones say so until Resume.
+  await tv.mouse.move(800, 880);
+  await tv.getByRole("button", { name: "Pause queue" }).click();
+  await expect(tv.locator(".smoke-break")).toContainText("Smoke break!");
+  await expect(phones.Blake.locator(".smoke-banner")).toBeVisible();
+  expect((await state(api, ev)).queue[0].guest_name).toBe("Alex");
+  await tv.mouse.move(800, 880);
+  await tv.getByRole("button", { name: "Resume queue" }).click();
+  await expect(tv.locator(".smoke-break")).toBeHidden();
+  await expect(tv.locator(".now-singing")).toContainText("Alex");
 });
 
 test("duets show both singers and reach the partner's phone", async ({ browser }) => {

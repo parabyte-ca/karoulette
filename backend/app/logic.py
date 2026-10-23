@@ -1,4 +1,4 @@
-"""Pure, side-effect-free game logic: singer order, fair queue order, theme picking and superset rolls.
+"""Pure, side-effect-free game logic: singer order, fair queue order, theme picking, superset rolls and votes.
 
 Everything here works on plain dicts so it can be unit tested without a database.
 """
@@ -19,6 +19,7 @@ DEFAULT_EVENT_CONFIG: dict = {
     "spin_seconds": 5,
     "ready_seconds": 5,          # "Get ready" countdown on the TV before each song; 0 turns it off
     "max_songs_per_singer": 0,   # songs a singer may have waiting at once; 0 = no limit
+    "superset_vote_seconds": 60, # how long a guest-called Superset vote stays open
 }
 
 CONFIG_LIMITS: dict = {
@@ -28,6 +29,7 @@ CONFIG_LIMITS: dict = {
     "spin_seconds": (1, 15),
     "ready_seconds": (0, 60),
     "max_songs_per_singer": (0, 50),
+    "superset_vote_seconds": (15, 300),
 }
 
 
@@ -61,20 +63,6 @@ def ordered_active(guests: Iterable[dict]) -> list[dict]:
 def next_rotation_pos(guests: Iterable[dict]) -> int:
     positions = [g["rotation_pos"] for g in guests]
     return (max(positions) + 1) if positions else 1
-
-
-def newcomer_position(guests: Sequence[dict], anchor_pos: int | None, newcomer_id: int | None = None) -> int | None:
-    """Where a new singer goes: right after the singer on the mic (``anchor_pos``), behind any other
-    newcomers still waiting for their first song. ``None`` means "append to the end" (nobody has sung
-    in this round yet, so join order applies)."""
-    if anchor_pos is None:
-        return None
-    pos = anchor_pos + 1
-    waiting = {g["rotation_pos"] for g in ordered_active(guests)
-               if g.get("debut_pending") and g["id"] != newcomer_id}
-    while pos in waiting:
-        pos += 1
-    return pos
 
 
 # --------------------------------------------------------------------------- fair queue
@@ -131,6 +119,18 @@ def pick_theme(themes: Sequence[dict], history_ids: Sequence[int], window: int,
         candidates = enabled
     weights = [float(t.get("weight", 1)) for t in candidates]
     return rng.choices(candidates, weights=weights, k=1)[0]
+
+
+def vote_outcome(yes: int, no: int, eligible: int, closing: bool = False) -> str | None:
+    """Result of a Superset vote among the other singers: "passed", "failed" or None (still open).
+
+    A majority of the votes cast wins; ties fail. It ends early once the result can't change: more than
+    half of everyone eligible said yes, at least half said no, or everyone has voted."""
+    if yes * 2 > eligible:
+        return "passed"
+    if no * 2 >= eligible or closing or yes + no >= eligible:
+        return "passed" if yes > no else "failed"
+    return None
 
 
 def roll_superset(chance: float, pending: str | None, rng: random.Random) -> bool:

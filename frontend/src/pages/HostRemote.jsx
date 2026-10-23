@@ -40,6 +40,8 @@ export default function HostRemote() {
   const np = state.now_playing;
   const gettingReady = !!np && readyLeft > 0;
   const superset = state.round.is_superset;
+  const vote = state.superset_vote;
+  const paused = ev.paused;
 
   return (
     <div className={`phone remote ${superset ? "is-superset" : ""}`}>
@@ -67,11 +69,15 @@ export default function HostRemote() {
         {state.round.number > 0 && (
           <div className="muted small">Round {state.round.number}{state.round.theme ? ` · ${state.round.theme.name}` : ""}{superset ? " · ★ Superset" : ""}</div>
         )}
+        {vote && <div className="warning small">★ Superset vote by {vote.called_by_name}: yes {vote.yes} · no {vote.no} of {vote.eligible}</div>}
+        {paused && <div className="warning small">🚬 Smoke break: the queue is on hold.</div>}
       </section>
 
       <section className="remote-pad">
         {ev.status !== "active" ? (
           <button className="btn btn-primary btn-xl wide" disabled={ev.status === "ended"} onClick={() => act("start")}>▶ Start event</button>
+        ) : paused ? (
+          <button className="btn btn-primary btn-xl wide" onClick={() => act("resume-queue")}>▶ Resume after the break</button>
         ) : gettingReady ? (
           <button className="btn btn-primary btn-xl wide" onClick={() => act("start-now")}>⏩ Start the song now</button>
         ) : np ? (
@@ -83,8 +89,11 @@ export default function HostRemote() {
         <button className="btn btn-xl" onClick={() => act("volume-up")} aria-label="Volume up">🔊 +</button>
         <button className="btn btn-xl" disabled={!np && !state.queue.length} onClick={() => act("skip-song")}>⏭ Skip</button>
         <button className="btn btn-xl" disabled={!np} onClick={() => act("stop-playback")} title="Stop and put the song back at the front">⏹ Stop</button>
+        {ev.status === "active" && !paused && (
+          <button className="btn btn-xl wide" onClick={() => act("pause-queue")}>🚬 Smoke break (pause queue)</button>
+        )}
         <button className="btn" disabled={!state.round.number} onClick={() => act("spin")}>🎰 Re-spin theme</button>
-        {(superset || ev.superset_pending === "force")
+        {(superset || vote || ev.superset_pending === "force")
           ? <button className="btn" onClick={() => act("superset-cancel")}>✖ Cancel superset</button>
           : <button className="btn btn-gold" onClick={() => act("superset-force")}>★ Force superset</button>}
       </section>

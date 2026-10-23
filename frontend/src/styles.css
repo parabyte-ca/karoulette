@@ -396,3 +396,34 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 .rejoin-note { background: var(--card); border: 1px dashed var(--line); border-radius: 12px; padding: 0.6em 0.9em; margin: 0 auto 0.8em; max-width: 420px; }
 .rejoin-code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: 0.15em; color: var(--highlight); font-size: 1.15em; }
 .code-input { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; letter-spacing: 0.25em; text-transform: uppercase; }
+
+/* ---------- Superset votes, Bouche!, smoke breaks */
+.vote-panel { border: 3px solid var(--highlight); box-shadow: 0 0 30px var(--glow-hl); animation: glow 1.6s infinite; }
+.vote-title { font-size: 1.15em; margin: 0.3em 0; }
+.vote-title .theme-pill { font-size: 0.95em; }
+.vote-bars { display: flex; flex-direction: column; gap: 0.35em; margin: 0.5em 0; }
+.vote-bar { position: relative; height: 1.7em; border-radius: 999px; background: var(--input); overflow: hidden; }
+.vote-bar span { position: absolute; inset: 0 auto 0 0; transition: width 0.4s ease; }
+.vote-bar.yes span { background: var(--highlight); }
+.vote-bar.no span { background: var(--line); }
+.vote-bar b { position: relative; padding-left: 0.7em; line-height: 1.7em; mix-blend-mode: difference; color: #fff; }
+.vote-card { border: 2px solid var(--highlight); box-shadow: 0 0 30px var(--glow-hl); text-align: center; }
+.vote-question { font-size: 1.2em; font-weight: 800; margin: 0.4em 0; }
+.vote-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6em; margin: 0.6em 0; }
+.vote-tally { font-weight: 700; color: var(--muted); margin: 0.3em 0 0; }
+.call-superset { margin-top: 0.6em; }
+
+.bouche-flash { background: linear-gradient(90deg, transparent, var(--red) 15%, var(--orange) 85%, transparent); color: #1a0500; }
+.bouche-flash .superset-word { animation: bouche 0.5s ease 3; }
+@keyframes bouche { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-4deg) scale(1.05); } 75% { transform: rotate(4deg) scale(1.05); } }
+
+.smoke-break { flex-direction: column; gap: 1em; text-align: center; }
+.smoke-text { background: var(--chrome-strong); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.2em 2.4em; backdrop-filter: blur(6px); }
+.smoke-word { font-family: var(--font-display); letter-spacing: var(--display-tracking); text-transform: var(--display-case); font-size: clamp(3rem, 8vw, 8rem); font-weight: 900; line-height: 1; color: var(--highlight); text-shadow: 0 0 40px var(--glow-hl); }
+.smoke-sub { font-size: 1.4em; font-weight: 700; margin: 0.4em 0; }
+.smoke { position: relative; width: 8em; height: 6em; }
+.smoke span { position: absolute; bottom: 0; left: 40%; width: 2.6em; height: 2.6em; border-radius: 50%; background: radial-gradient(circle, rgba(220, 220, 235, 0.55), rgba(220, 220, 235, 0) 70%); animation: puff 4.5s ease-out infinite; }
+.smoke span:nth-child(2) { animation-delay: 1.5s; left: 30%; }
+.smoke span:nth-child(3) { animation-delay: 3s; left: 50%; }
+@keyframes puff { 0% { transform: translate(0, 0) scale(0.4); opacity: 0; } 20% { opacity: 1; } 100% { transform: translate(1.5em, -5em) scale(2.4); opacity: 0; } }
+.smoke-banner { background: var(--card-2); border: 2px dashed var(--highlight); color: var(--highlight); font-weight: 800; padding: 0.6em 1em; border-radius: 12px; margin-bottom: 0.8rem; text-align: center; }

@@ -65,8 +65,11 @@ class Engine:
         self.outbox.append({"event_id": event_id, "guest_id": guest_id,
                             "message": {"type": type_, "data": data or {}}})
 
-    def notice(self, event_id: int, text: str, level: str = "info", guest_id: int | None = None) -> None:
-        self.emit(event_id, "notice", {"text": text, "level": level}, guest_id)
+    def notice(self, event_id: int, text: str, level: str = "info", guest_id: int | None = None,
+               kind: str | None = None) -> None:
+        """A toast for phones and the TV. ``kind`` tags notices the TV already shows as a big banner."""
+        data = {"text": text, "level": level, **({"kind": kind} if kind else {})}
+        self.emit(event_id, "notice", data, guest_id)
 
     def drain(self) -> list[dict]:
         out, self.outbox = self.outbox, []
@@ -228,7 +231,7 @@ class Engine:
         if ev["current_round"] == 0:
             self._start_round(event_id, 1)
         ev = self.get_event(event_id)
-        if ev["config"]["autoplay"] and not ev["now_playing_item_id"]:
+        if ev["config"]["autoplay"] and not ev["now_playing_item_id"] and not ev["paused"]:
             self.play_next(event_id)
         self.emit(event_id, "event_started")
 
@@ -240,7 +243,12 @@ class Engine:
                         (event_id,))
         self.db.execute("UPDATE queue_items SET status = 'played', played_at = ? "
                         "WHERE event_id = ? AND status = 'playing'", (self.clock(), event_id))
-        self._set(event_id, status="ended", ended_at=self.clock(), now_playing_item_id=None, ready_until=None)
+        vote = self._open_vote(event_id)
+        if vote:
+            self.db.execute("UPDATE superset_votes SET status = 'cancelled', closed_at = ? WHERE id = ?",
+                            (self.clock(), vote["id"]))
+        self._set(event_id, status="ended", ended_at=self.clock(), now_playing_item_id=None, ready_until=None,
+                  paused=0)
         self.emit(event_id, "event_ended")
         self.notice(event_id, "Thanks for singing! This event has ended.")
 
@@ -266,16 +274,6 @@ class Engine:
         anchor = self._anchor(ev)
         return anchor["rotation_pos"] if anchor else None
 
-    def _place_next_in_line(self, ev: dict, guest_id: int) -> bool:
-        """Move a new singer to just after whoever is singing (behind other waiting newcomers)."""
-        pos = logic.newcomer_position(self._guests(ev["id"]), self._anchor_pos(ev), guest_id)
-        if pos is None:
-            return False
-        self.db.execute("UPDATE guests SET rotation_pos = rotation_pos + 1 "
-                        "WHERE event_id = ? AND rotation_pos >= ? AND id != ?", (ev["id"], pos, guest_id))
-        self.db.execute("UPDATE guests SET rotation_pos = ? WHERE id = ?", (pos, guest_id))
-        return True
-
     def _positions(self, event_id: int) -> dict[int, int]:
         return {g["id"]: g["rotation_pos"] for g in self._guests(event_id, active_only=False)}
 
@@ -296,10 +294,8 @@ class Engine:
             "rejoin_code) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (event_id, name, hash_token(token), logic.next_rotation_pos(self._guests(event_id, active_only=False)),
              self.clock(), int(singing_started), self._new_rejoin_code(event_id)))
-        if singing_started:
-            self._place_next_in_line(ev, guest_id)
-            self.notice(event_id, f"🎉 New singer! {name} joins the line-up, right after the current singer.",
-                        "success")
+        if singing_started:  # new singers join the end of the singer order; they're announced at their debut
+            self.notice(event_id, f"🎉 New singer! {name} joins the end of the line-up.", "success")
         self.emit(event_id, "guest_joined", {"guest_id": guest_id, "name": name, "new_singer": singing_started})
         return self._guest(guest_id), token
 
@@ -345,7 +341,7 @@ class Engine:
             raise EngineError("Your session has expired. Please join again.", 401)
         return g
 
-    def _drop_guest(self, guest_id: int, status: str, text: str) -> None:
+    def _drop_guest(self, guest_id: int, status: str, text: str, kind: str | None = None) -> None:
         g = self._guest(guest_id)
         if g["status"] != "active":
             return
@@ -355,15 +351,19 @@ class Engine:
         self.db.execute("UPDATE queue_items SET duet_guest_id = NULL WHERE duet_guest_id = ? AND status = 'queued'",
                         (guest_id,))
         self.emit(g["event_id"], "guest_left", {"guest_id": guest_id, "name": g["display_name"], "reason": status})
-        self.notice(g["event_id"], text)
+        self.notice(g["event_id"], text, kind=kind)
 
     def leave(self, guest_id: int) -> None:
         g = self._guest(guest_id)
         self._drop_guest(guest_id, "left", f"{g['display_name']} has left the party.")
 
     def remove_guest(self, guest_id: int) -> None:
+        """Host: "Bouche!" a singer off the line-up (their queued songs go too). The TV makes a show of it."""
         g = self._guest(guest_id)
-        self._drop_guest(guest_id, "removed", f"{g['display_name']} was removed by the host.")
+        if g["status"] != "active":
+            return
+        self._drop_guest(guest_id, "removed", f"🥖 {g['display_name']} has been BOUCHED!", kind="bouched")
+        self.emit(g["event_id"], "bouched", {"guest_id": guest_id, "name": g["display_name"]})
 
     def move_guest(self, guest_id: int, direction: int) -> None:
         """Host: move a singer one place earlier (-1) or later (+1) in the singer order."""
@@ -392,6 +392,9 @@ class Engine:
             "started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (event_id, number, int(superset), theme["id"] if superset else None, theme["id"] if theme else None,
              theme["name"] if theme else None, self.clock(), self.clock()))
+        if self._open_vote(event_id):
+            self._close_vote(self._open_vote(event_id), "cancelled",
+                             "The round ended before the Superset vote finished.")
         self._set(event_id, current_round=number, current_round_id=round_id, superset_pending=None)
         self.emit(event_id, "round_changed", {"number": number, "is_superset": superset,
                                               "theme": self._theme_out(theme)})
@@ -429,7 +432,10 @@ class Engine:
     def cancel_superset(self, event_id: int) -> None:
         ev = self.get_event(event_id)
         rnd = self._round(ev["current_round_id"])
-        if ev["superset_pending"] == "force":
+        vote = self._open_vote(event_id)
+        if vote:
+            self._close_vote(vote, "cancelled", "The host cancelled the Superset vote.")
+        elif ev["superset_pending"] == "force":
             self._set(event_id, superset_pending=None)
             self.notice(event_id, "The upcoming Superset round was cancelled.")
         elif rnd and rnd["is_superset"]:
@@ -439,6 +445,88 @@ class Engine:
             self._set(event_id, superset_pending="cancel")
             self.notice(event_id, "No Superset next round.")
         self.emit(event_id, "superset", {"active": False, "pending": self.get_event(event_id)["superset_pending"]})
+
+    # ------------------------------------------------------------------ Superset votes
+
+    def _open_vote(self, event_id: int) -> dict | None:
+        return self.db.one("SELECT * FROM superset_votes WHERE event_id = ? AND status = 'open'", (event_id,))
+
+    def _vote_counts(self, vote: dict) -> tuple[int, int, int]:
+        """(yes, no, eligible): everyone still at the event except the singer who called it votes."""
+        ballots = self.db.all("SELECT b.yes FROM superset_ballots b JOIN guests g ON g.id = b.guest_id "
+                              "WHERE b.vote_id = ? AND g.status = 'active'", (vote["id"],))
+        yes = sum(1 for b in ballots if b["yes"])
+        eligible = sum(1 for g in self._guests(vote["event_id"]) if g["id"] != vote["called_by"])
+        return yes, len(ballots) - yes, eligible
+
+    def call_superset_vote(self, guest_id: int) -> dict:
+        """Any singer can call a Superset for the round in progress; the others vote and the majority wins."""
+        guest = self._guest(guest_id)
+        ev = self.get_event(guest["event_id"])
+        rnd = self._round(ev["current_round_id"])
+        if ev["status"] != "active" or not rnd:
+            raise EngineError("A Superset can be called once the event has started.", 409)
+        if rnd["is_superset"]:
+            raise EngineError("This round is already a Superset!", 409)
+        if not rnd["theme_name"]:
+            raise EngineError("This round has no theme to sing to.", 409)
+        if self._open_vote(ev["id"]):
+            raise EngineError("A Superset vote is already under way. Cast your vote!", 409)
+        if self.db.one("SELECT 1 FROM superset_votes WHERE round_id = ? AND called_by = ?", (rnd["id"], guest_id)):
+            raise EngineError("You've already called a Superset this round.", 409)
+        if not any(g["id"] != guest_id for g in self._guests(ev["id"])):
+            raise EngineError("You need at least one other singer to vote on it.", 409)
+        now = self.clock()
+        vote_id = self.db.insert(
+            "INSERT INTO superset_votes(event_id, round_id, called_by, started_at, ends_at) VALUES (?, ?, ?, ?, ?)",
+            (ev["id"], rnd["id"], guest_id, now, now + int(ev["config"]["superset_vote_seconds"])))
+        self.notice(ev["id"], f"★ {guest['display_name']} calls a SUPERSET on “{rnd['theme_name']}”! "
+                              "Vote on your phone.", "gold")
+        self.emit(ev["id"], "superset_vote", {"status": "open", "name": guest["display_name"],
+                                              "theme": rnd["theme_name"]})
+        return self.db.one("SELECT * FROM superset_votes WHERE id = ?", (vote_id,))
+
+    def vote_superset(self, guest_id: int, yes: bool) -> None:
+        guest = self._guest(guest_id)
+        vote = self._open_vote(guest["event_id"])
+        if not vote:
+            raise EngineError("There's no Superset vote right now.", 409)
+        if vote["called_by"] == guest_id:
+            raise EngineError("You called this one, so it's up to everyone else.", 409)
+        self.db.execute("INSERT INTO superset_ballots(vote_id, guest_id, yes) VALUES (?, ?, ?) "
+                        "ON CONFLICT(vote_id, guest_id) DO UPDATE SET yes = excluded.yes",
+                        (vote["id"], guest_id, int(bool(yes))))
+        self.emit(guest["event_id"], "superset_vote", {"status": "open", "voted": True})
+        self._settle_vote(vote)
+
+    def _settle_vote(self, vote: dict, closing: bool = False) -> None:
+        yes, no, eligible = self._vote_counts(vote)
+        outcome = logic.vote_outcome(yes, no, eligible, closing)
+        if outcome == "passed":
+            rnd = self._round(vote["round_id"])
+            self.db.execute("UPDATE rounds SET is_superset = 1, superset_theme_id = theme_id WHERE id = ?",
+                            (rnd["id"],))
+            self.db.execute("UPDATE queue_items SET is_superset = 1 WHERE id = (SELECT now_playing_item_id FROM events "
+                            "WHERE id = ?)", (vote["event_id"],))
+            self._close_vote(vote, "passed", f"★ The vote passed ({yes}–{no})! This round is a SUPERSET: "
+                                             f"everyone sings “{rnd['theme_name']}”.", "gold")
+            self.emit(vote["event_id"], "superset", {"active": True, "round": rnd["number"], "voted": True,
+                                                     "theme": self._theme_out(self._theme(rnd["theme_id"]))
+                                                     or {"id": None, "name": rnd["theme_name"], "description": ""}})
+        elif outcome == "failed":
+            self._close_vote(vote, "failed", f"The Superset vote didn't pass ({yes}–{no}). Sing what you like!")
+
+    def _close_vote(self, vote: dict, status: str, text: str, level: str = "info") -> None:
+        self.db.execute("UPDATE superset_votes SET status = ?, closed_at = ? WHERE id = ?",
+                        (status, self.clock(), vote["id"]))
+        self.notice(vote["event_id"], text, level)
+        self.emit(vote["event_id"], "superset_vote", {"status": status})
+
+    def tick(self) -> None:
+        """Called every second by the server: closes Superset votes whose time is up."""
+        for vote in self.db.all("SELECT * FROM superset_votes WHERE status = 'open' AND ends_at <= ?",
+                                (self.clock(),)):
+            self._settle_vote(vote, closing=True)
 
     # ------------------------------------------------------------------ queue
 
@@ -473,9 +561,6 @@ class Engine:
                 raise EngineError("Your duet partner isn't at this event any more.", 404)
             if duet_guest_id == guest_id:
                 raise EngineError("Pick someone else to sing the duet with.")
-        first_song = not mine and guest["debut_pending"]
-        if first_song and self._place_next_in_line(ev, guest_id):  # the line moved on since they joined
-            guest = self._guest(guest_id)
         last_round = max((m["round_no"] or ev["current_round"] for m in mine), default=None)
         round_no = logic.assign_round(ev["current_round"], self._anchor_pos(ev), guest["rotation_pos"], last_round)
         priority = None
@@ -493,9 +578,8 @@ class Engine:
         if duet_guest_id is not None:
             self.emit(ev["id"], "duet_invite", {"item_id": item_id, "name": guest["display_name"],
                                                 "title": video["title"]}, guest_id=duet_guest_id)
-        if first_song:
-            self.notice(ev["id"], f"New singer {guest['display_name']} is next in line!", "success")
-        if ev["status"] == "active" and ev["config"]["autoplay"] and not ev["now_playing_item_id"]:
+        if ev["status"] == "active" and ev["config"]["autoplay"] and not ev["now_playing_item_id"] \
+                and not ev["paused"]:
             self.play_next(ev["id"])
         return self.db.one("SELECT * FROM queue_items WHERE id = ?", (item_id,))
 
@@ -606,7 +690,7 @@ class Engine:
             self.db.execute("UPDATE queue_items SET status = 'played', played_at = ? WHERE id = ? AND status = 'playing'",
                             (self.clock(), ev["now_playing_item_id"]))
         nxt = self._queue(event_id)
-        if not nxt or ev["status"] != "active":
+        if not nxt or ev["status"] != "active" or ev["paused"]:
             self._set(event_id, now_playing_item_id=None, ready_until=None)
             self.emit(event_id, "now_playing", {"item": None})
             return None
@@ -634,6 +718,26 @@ class Engine:
             for gid in filter(None, (nxt[1]["guest_id"], nxt[1]["duet_guest_id"])):
                 self.emit(event_id, "you_are_next", {"title": nxt[1]["title"]}, guest_id=gid)
         return item
+
+    def pause_queue(self, event_id: int) -> None:
+        """Host: "Smoke break!" Stop the song (it goes back to the front) and hold the queue."""
+        ev = self.get_event(event_id)
+        if ev["status"] != "active" or ev["paused"]:
+            return
+        self.stop_playback(event_id)
+        self._set(event_id, paused=1)
+        self.emit(event_id, "queue_paused")
+        self.notice(event_id, "🚬 Smoke break! The queue is on hold. Keep adding songs.", kind="paused")
+
+    def resume_queue(self, event_id: int) -> None:
+        ev = self.get_event(event_id)
+        if not ev["paused"]:
+            return
+        self._set(event_id, paused=0)
+        self.emit(event_id, "queue_resumed")
+        self.notice(event_id, "Break's over! Back to the music. 🎤", "success")
+        if ev["status"] == "active" and not ev["now_playing_item_id"]:
+            self.play_next(event_id)
 
     def start_now(self, event_id: int) -> None:
         """Host: cut the "Get ready" countdown short."""
@@ -735,7 +839,8 @@ class Engine:
         return {
             "server_time": now,
             "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"], "status": ev["status"],
-                      "config": ev["config"], "superset_pending": ev["superset_pending"]},
+                      "config": ev["config"], "superset_pending": ev["superset_pending"],
+                      "paused": bool(ev["paused"])},
             "round": {"number": ev["current_round"], "is_superset": bool(rnd and rnd["is_superset"]),
                       "theme": self._theme_out(theme) or ({"id": None, "name": rnd["theme_name"], "description": ""}
                                                           if rnd and rnd["theme_name"] else None),
@@ -751,8 +856,21 @@ class Engine:
             "rounds": history,
             "appearance": self.appearance(),
             "reactions": list(REACTIONS),
+            "superset_vote": self._vote_out(event_id, names),
+            "vote_callers": [r["called_by"] for r in self.db.all(
+                "SELECT called_by FROM superset_votes WHERE round_id = ?", (rnd["id"],))] if rnd else [],
             "recap": self.recap(event_id) if ev["status"] == "ended" else None,
         }
+
+    def _vote_out(self, event_id: int, names: dict[int, str]) -> dict | None:
+        vote = self._open_vote(event_id)
+        if not vote:
+            return None
+        yes, no, eligible = self._vote_counts(vote)
+        voters = [b["guest_id"] for b in self.db.all("SELECT guest_id FROM superset_ballots WHERE vote_id = ?",
+                                                      (vote["id"],))]
+        return {"id": vote["id"], "called_by": vote["called_by"], "called_by_name": names.get(vote["called_by"], "?"),
+                "ends_at": vote["ends_at"], "yes": yes, "no": no, "eligible": eligible, "voters": voters}
 
     def recap(self, event_id: int) -> dict:
         """End-of-night numbers for the TV and phones."""

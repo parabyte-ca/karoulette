@@ -110,6 +110,25 @@ CREATE TABLE IF NOT EXISTS flags (
     PRIMARY KEY (queue_item_id, flagged_by)
 );
 
+CREATE TABLE IF NOT EXISTS superset_votes (           -- a guest calls a Superset for the current round
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    round_id INTEGER REFERENCES rounds(id) ON DELETE CASCADE,
+    called_by INTEGER REFERENCES guests(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'open',          -- open | passed | failed | cancelled
+    started_at REAL NOT NULL,
+    ends_at REAL NOT NULL,
+    closed_at REAL
+);
+CREATE INDEX IF NOT EXISTS ix_votes_event ON superset_votes(event_id, status);
+
+CREATE TABLE IF NOT EXISTS superset_ballots (
+    vote_id INTEGER NOT NULL REFERENCES superset_votes(id) ON DELETE CASCADE,
+    guest_id INTEGER NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
+    yes INTEGER NOT NULL,
+    PRIMARY KEY (vote_id, guest_id)
+);
+
 CREATE TABLE IF NOT EXISTS search_cache (
     query_key TEXT PRIMARY KEY,
     results TEXT NOT NULL,
@@ -132,7 +151,7 @@ CREATE TABLE IF NOT EXISTS quota_ledger (
 
 
 # Columns added after the first release (v0.6.0: free song submission with a fair round-robin queue;
-# v0.7.0: get-ready countdown, duets and rejoin codes).
+# v0.7.0: get-ready countdown, duets, rejoin codes and the smoke-break pause).
 ADDED_COLUMNS = [
     ("queue_items", "round_no", "INTEGER"),            # rotation round this song belongs to
     ("queue_items", "priority", "REAL"),               # non-NULL = plays before the round-robin, ascending
@@ -144,6 +163,7 @@ ADDED_COLUMNS = [
     ("guests", "repick_credit", "INTEGER NOT NULL DEFAULT 0"),  # their last song couldn't play
     # v0.7.0
     ("events", "ready_until", "REAL"),                 # the TV's "Get ready" countdown ends at this time
+    ("events", "paused", "INTEGER NOT NULL DEFAULT 0"),  # "Smoke break!": the queue is on hold
     ("queue_items", "duet_guest_id", "INTEGER"),       # second singer on a duet
     ("guests", "rejoin_code", "TEXT"),                 # lets a singer get back in on another phone
 ]

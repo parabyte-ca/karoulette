@@ -47,6 +47,10 @@ class QueueIn(BaseModel):
     duet_guest_id: int | None = None
 
 
+class VoteIn(BaseModel):
+    yes: bool
+
+
 class ReactionIn(BaseModel):
     emoji: str = Field(min_length=1, max_length=8)
 
@@ -94,7 +98,8 @@ class PlayerIn(BaseModel):
 EVENT_ACTIONS: dict[str, str] = {
     "start": "start_event", "end": "end_event", "spin": "force_spin", "superset-force": "force_superset",
     "superset-cancel": "cancel_superset", "play-next": "play_next", "skip-song": "skip_song",
-    "stop-playback": "stop_playback", "start-now": "start_now",
+    "stop-playback": "stop_playback", "start-now": "start_now", "pause-queue": "pause_queue",
+    "resume-queue": "resume_queue",
 }
 VIDEO_ACTIONS: dict[str, str] = {"video-toggle": "toggle", "volume-up": "volume_up", "volume-down": "volume_down"}
 STATIC_FILES: dict[str, str | None] = {  # files served from the site root, with their media type
@@ -149,10 +154,11 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         return result
 
     async def ticker():
-        purge_at = 0.0
+        purge_at = asyncio.get_running_loop().time() + 30
         while True:
-            await asyncio.sleep(30)
+            await asyncio.sleep(1)
             try:
+                await run(engine.tick)  # Superset votes that have run out of time
                 loop_time = asyncio.get_running_loop().time()
                 if loop_time > purge_at:
                     yt.purge_cache()
@@ -326,6 +332,16 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     @app.post("/api/guest/queue/{item_id}/leave-duet")
     async def guest_leave_duet(item_id: int, guest: dict = Depends(current_guest)):
         await run(engine.leave_duet, guest["id"], item_id, event_id=guest["event_id"])
+        return {"ok": True}
+
+    @app.post("/api/guest/superset/call")
+    async def guest_call_superset(guest: dict = Depends(current_guest)):
+        await run(engine.call_superset_vote, guest["id"], event_id=guest["event_id"])
+        return {"ok": True}
+
+    @app.post("/api/guest/superset/vote")
+    async def guest_vote_superset(body: VoteIn, guest: dict = Depends(current_guest)):
+        await run(engine.vote_superset, guest["id"], body.yes, event_id=guest["event_id"])
         return {"ok": True}
 
     @app.post("/api/guest/react")

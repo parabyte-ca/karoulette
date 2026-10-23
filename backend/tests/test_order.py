@@ -1,4 +1,4 @@
-"""Fair singer order: free submission, one song per singer per round, newcomers next in line."""
+"""Fair singer order: free submission, one song per singer per round, newcomers at the end of the order."""
 import pytest
 
 from app import logic
@@ -38,14 +38,6 @@ def test_play_order_round_then_singer_order():
     assert [i["id"] for i in order] == [4, 3, 2, 1]
 
 
-def test_newcomer_position():
-    guests = [g(1, 1), g(2, 2), g(3, 3), g(4, 4, debut_pending=1)]
-    assert logic.newcomer_position(guests, None) is None       # nobody has sung: append
-    assert logic.newcomer_position(guests, 2) == 3             # right after the singer on the mic
-    assert logic.newcomer_position(guests, 3) == 5             # behind a newcomer still waiting
-    assert logic.newcomer_position(guests, 3, newcomer_id=4) == 4
-
-
 # ---- engine
 
 def test_singers_add_many_songs_without_waiting(engine, make_event):
@@ -74,19 +66,22 @@ def test_songs_added_mid_round_respect_the_order(engine, make_event):
     assert singer_order(engine, eid) == ["Blake", "Casey", "Alex", "Blake"]
 
 
-def test_new_singer_goes_next_in_line_and_is_announced(engine, make_event):
+def test_new_singer_joins_the_end_of_the_order_and_is_announced(engine, make_event):
     eid, (a, b, c) = make_event()
-    for p in (a, b, c):
+    for p in (a, b, c, a):
         add(engine, p)
     engine.play_next(eid)                # Alex singing; Blake and Casey waiting
     engine.drain()
     dana, _ = engine.join(eid, "Dana")
     msgs = engine.drain()
     assert any(m["message"]["type"] == "guest_joined" and m["message"]["data"]["new_singer"] for m in msgs)
-    assert any("New singer" in m["message"]["data"].get("text", "") for m in msgs)
+    assert any("end of the line-up" in m["message"]["data"].get("text", "") for m in msgs)
     add(engine, dana)
-    assert singer_order(engine, eid) == ["Alex", "Dana", "Blake", "Casey"]
-    engine.player_ended(eid, engine.get_event(eid)["now_playing_item_id"])
+    # No jumping the line: Dana sings last in this round, before anyone's second song.
+    assert singer_order(engine, eid) == ["Alex", "Blake", "Casey", "Dana", "Alex"]
+    assert [g["name"] for g in engine.snapshot(eid)["guests"]] == ["Alex", "Blake", "Casey", "Dana"]
+    for _ in range(3):
+        engine.player_ended(eid, engine.get_event(eid)["now_playing_item_id"])
     msgs = engine.drain()
     assert any(m["message"]["type"] == "new_singer" and m["message"]["data"]["name"] == "Dana" for m in msgs)
     assert not engine._guest(dana["id"])["debut_pending"]
@@ -101,18 +96,18 @@ def test_two_newcomers_keep_their_join_order(engine, make_event):
     eli, _ = engine.join(eid, "Eli")
     add(engine, eli)
     add(engine, dana)
-    assert singer_order(engine, eid) == ["Alex", "Dana", "Eli", "Blake"]
+    assert singer_order(engine, eid) == ["Alex", "Blake", "Dana", "Eli"]
 
 
-def test_newcomer_who_picks_later_is_still_next_in_line(engine, make_event):
+def test_newcomer_who_picks_later_still_waits_their_turn(engine, make_event):
     eid, (a, b, c) = make_event()
     for p in (a, b, c, a, b, c):
         add(engine, p)
     engine.play_next(eid)                            # Alex
     dana, _ = engine.join(eid, "Dana")
     engine.player_ended(eid, engine.get_event(eid)["now_playing_item_id"])  # Blake now
-    add(engine, dana)                                # the line moved on: Dana goes after Blake
-    assert singer_order(engine, eid) == ["Blake", "Dana", "Casey", "Alex", "Blake", "Casey"]
+    add(engine, dana)                                # end of this round, after Casey
+    assert singer_order(engine, eid) == ["Blake", "Casey", "Dana", "Alex", "Blake", "Casey"]
 
 
 def test_join_before_anyone_sings_appends(engine, make_event):

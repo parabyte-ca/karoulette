@@ -68,10 +68,12 @@ export default function HostScreen() {
   const [spinMeta, setSpinMeta] = useState({ duration: 5 });
   const [playerState, setPlayerState] = useState(-1);
   const [reactions, setReactions] = useState([]);
+  const [bouched, setBouched] = useState(null);
   const [showRemote, setShowRemote] = useState(false);
   const { toasts, push } = useToasts();
   const playerRef = useRef(null);
   const hideTimer = useRef(null);
+  const pausedRef = useRef(false);
 
   useEffect(() => {
     api(`/api/host/events/${eventId}/state`)
@@ -88,7 +90,12 @@ export default function HostScreen() {
     const d = msg.data || {};
     switch (msg.type) {
       case "notice":
-        if (!msg.for_guest_id) push(d.text, d.level);
+        // Bouches and smoke breaks get the whole screen, so skip their toasts here.
+        if (!msg.for_guest_id && !["bouched", "paused"].includes(d.kind)) push(d.text, d.level);
+        break;
+      case "bouched":
+        setBouched(d.name);
+        setTimeout(() => setBouched(null), 6000);
         break;
       case "guest_joined":
         if (!d.new_singer) push(`🎉 ${d.name} joined the party!`, "success");  // new singers get a notice
@@ -166,6 +173,7 @@ export default function HostScreen() {
       else if (e.key === "s" || e.key === "S") act("spin");
       else if (e.key === "h" || e.key === "H") setControlsVisible((v) => !v);
       else if (e.key === "g" || e.key === "G") act("start-now");
+      else if (e.key === "p" || e.key === "P") act(pausedRef.current ? "resume-queue" : "pause-queue");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -177,6 +185,9 @@ export default function HostScreen() {
   const spinning = !!round?.spun_at && spinLeft > 0;
   const readyLeft = useCountdown(nowPlaying?.starts_at || null, serverNow, 0);
   const gettingReady = !!nowPlaying && readyLeft > 0;
+  const vote = state?.superset_vote;
+  const voteLeft = useCountdown(vote?.ends_at || null, serverNow, 0);
+  pausedRef.current = !!state?.event.paused;
 
   if (!checked) {
     return <PremiumChecklist onContinue={() => {
@@ -189,6 +200,7 @@ export default function HostScreen() {
 
   const ev = state.event;
   const superset = state.round.is_superset;
+  const paused = ev.paused;
   const qrSrc = `/api/public/qr.svg?code=${ev.join_code}`;
   const upNext = state.queue[0];
   const idle = !nowPlaying;
@@ -238,6 +250,13 @@ export default function HostScreen() {
         </div>
       )}
 
+      {bouched && (
+        <div className="superset-flash bouche-flash" aria-live="assertive">
+          <div className="superset-word">BOUCHED!</div>
+          <div className="superset-theme">🥖 {bouched} has been BOUCHED! 🥖</div>
+        </div>
+      )}
+
       {supersetFlash && (
         <div className="superset-flash" aria-live="assertive">
           <div className="superset-word">SUPERSET!</div>
@@ -268,7 +287,17 @@ export default function HostScreen() {
             {idle && ev.status === "ended" && state.recap && (
               <div className="idle-overlay recap-overlay"><Recap recap={state.recap} eventName={ev.name} /></div>
             )}
-            {idle && !(ev.status === "ended" && state.recap) && (
+            {idle && paused && (
+              <div className="idle-overlay smoke-break" aria-live="assertive">
+                <div className="smoke" aria-hidden="true"><span /><span /><span /></div>
+                <div className="smoke-text">
+                  <div className="smoke-word">Smoke break!</div>
+                  <div className="smoke-sub">The music's on hold. Keep adding songs: we'll be right back.</div>
+                  <div className="join-code">Join at {joinUrl.replace(/^https?:\/\//, "")} · Code <strong>{ev.join_code}</strong></div>
+                </div>
+              </div>
+            )}
+            {idle && !paused && !(ev.status === "ended" && state.recap) && (
               <div className="idle-overlay">
                 {spinning ? roundPanel : (
                   <>
@@ -302,6 +331,18 @@ export default function HostScreen() {
         </section>
 
         <aside className="tv-side">
+          {vote && (
+            <div className="side-card vote-panel" aria-live="polite">
+              <div className="label">★ Superset vote · {Math.ceil(voteLeft)} s</div>
+              <div className="vote-title"><strong>{vote.called_by_name}</strong> wants everyone to sing
+                {" "}<span className="theme-pill superset">{round.theme?.name}</span></div>
+              <div className="vote-bars">
+                <div className="vote-bar yes"><span style={{ width: `${(vote.yes / Math.max(1, vote.eligible)) * 100}%` }} /><b>Yes {vote.yes}</b></div>
+                <div className="vote-bar no"><span style={{ width: `${(vote.no / Math.max(1, vote.eligible)) * 100}%` }} /><b>No {vote.no}</b></div>
+              </div>
+              <div className="turn-sub small">Vote on your phone! Majority wins ({vote.yes + vote.no} of {vote.eligible} voted).</div>
+            </div>
+          )}
           {!(idle && spinning) && roundPanel}
 
           <div className="side-card grow">
@@ -353,7 +394,10 @@ export default function HostScreen() {
         {ev.status !== "active" && (
           <button className="btn btn-primary" onClick={() => act("start")} disabled={ev.status === "ended"}>▶ Start event</button>
         )}
-        {gettingReady ? (
+        {ev.status === "active" && (paused
+          ? <button className="btn btn-primary" onClick={() => act("resume-queue")}>▶ Resume queue</button>
+          : <button className="btn" onClick={() => act("pause-queue")}>🚬 Pause queue</button>)}
+        {paused ? null : gettingReady ? (
           <button className="btn btn-primary" onClick={() => act("start-now")}>⏩ Start now</button>
         ) : (
           <button className="btn" onClick={() => (nowPlaying ? playerRef.current?.toggle() : act("play-next"))}>
@@ -362,7 +406,7 @@ export default function HostScreen() {
         )}
         <button className="btn" onClick={() => act("skip-song")} disabled={!nowPlaying && !state.queue.length}>⏭ Skip song</button>
         <button className="btn" onClick={() => act("spin")} disabled={!round.number}>🎰 Re-spin theme</button>
-        {(superset || ev.superset_pending === "force")
+        {(superset || vote || ev.superset_pending === "force")
           ? <button className="btn" onClick={() => act("superset-cancel")}>✖ Cancel superset</button>
           : <button className="btn btn-gold" onClick={() => act("superset-force")}>★ Force superset</button>}
         <span className="spacer" />
