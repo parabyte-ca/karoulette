@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 import io
 import logging
 import time
@@ -17,6 +18,8 @@ from pydantic import BaseModel, Field
 
 from . import auth
 from .backups import BackupError, Backups
+from .banner import TYPES as BANNER_TYPES
+from .banner import BannerError, BannerStore
 from .config import Settings
 from .db import Database
 from .engine import REACTIONS, Engine, EngineError
@@ -63,6 +66,10 @@ class ReactionIn(BaseModel):
 
 class AppearanceIn(BaseModel):
     scheme: str = Field(min_length=1, max_length=20)
+
+
+class BannerAllIn(BaseModel):
+    on: bool
 
 
 class PinIn(BaseModel):
@@ -131,6 +138,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     yt = youtube or YouTubeService(db, settings.youtube_api_key, settings.youtube_daily_quota, settings.enable_ytdlp)
     upd = updates or UpdateService(db, settings.version, settings.source_repo, settings.upgrade_dir)
     backups = Backups(db, settings.data_path, settings.version)
+    banners = BannerStore(settings.data_path)
     started_at = time.time()
     hub = Hub()
     lock = asyncio.Lock()
@@ -649,6 +657,46 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         await broadcast([], set(hub.rooms))  # repaint every TV and phone right away
         return result
 
+    @app.get("/api/public/banner")
+    async def public_banner():
+        custom = db.get_setting("banner_custom")
+        path = banners.path(custom["ext"]) if custom else None
+        if not path:
+            raise HTTPException(404, "No banner uploaded")
+        # The URL carries a version, so browsers can keep it until a new banner is uploaded.
+        return FileResponse(path, media_type=BANNER_TYPES[custom["ext"]],
+                            headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+    @app.put("/api/host/appearance/banner", dependencies=host)
+    async def upload_banner(request: Request):
+        """A new banner image, sent as the raw request body."""
+        chunks, size = [], 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > 8_000_000:
+                raise HTTPException(413, "That image is over 8 MB.")
+            chunks.append(chunk)
+        try:
+            ext = banners.save(b"".join(chunks))
+        except BannerError as exc:
+            raise HTTPException(exc.status, exc.message) from exc
+        result = await run(engine.set_banner, ext)
+        await broadcast([], set(hub.rooms))
+        return result
+
+    @app.delete("/api/host/appearance/banner", dependencies=host)
+    async def delete_banner():
+        banners.delete()
+        result = await run(engine.set_banner, None)
+        await broadcast([], set(hub.rooms))
+        return result
+
+    @app.put("/api/host/appearance/banner-all", dependencies=host)
+    async def banner_on_all(body: BannerAllIn):
+        result = await run(engine.set_banner_all, body.on)
+        await broadcast([], set(hub.rooms))
+        return result
+
     @app.get("/api/public/themes")
     async def public_themes():
         return [t["name"] for t in engine.list_themes() if t["enabled"]]
@@ -697,25 +745,54 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
 
     # ------------------------------------------------------------------ SPA
 
+    def spa_page(request: Request, code: str | None = None) -> Response:
+        """The app's index.html, with link-preview tags so a shared join link shows the event and banner."""
+        index = settings.static_dir / "index.html"
+        if not index.exists():
+            return JSONResponse({"detail": "Frontend not built. API is at /api."}, status_code=404)
+        title, description = "Karoulette", "Karaoke night: queue songs from your phone and watch the line-up live."
+        if code:
+            try:
+                ev = engine.event_by_code(code)
+                if ev["status"] != "ended":
+                    title = f"Join {ev['name']} on Karoulette"
+                    description = f"Tap to join with code {ev['join_code']}, then queue your songs from your phone. 🎤"
+            except EngineError:
+                pass
+        look = engine.appearance()
+        image = f"{base_url(request)}{look['og_image'] or '/icon-512.png'}"
+        tags = "".join(
+            f'<meta property="{p}" content="{html.escape(v, quote=True)}" />' for p, v in (
+                ("og:type", "website"), ("og:site_name", "Karoulette"), ("og:title", title),
+                ("og:description", description), ("og:image", image)))
+        tags += ('<meta name="twitter:card" content="summary_large_image" />'
+                 f'<meta name="description" content="{html.escape(description, quote=True)}" />')
+        page = index.read_text().replace("</head>", tags + "</head>", 1)
+        return Response(page, media_type="text/html")
+
     @app.exception_handler(404)
     async def not_found(request: Request, exc):
         if request.url.path.startswith(("/api/", "/ws/")):
             detail = getattr(exc, "detail", "Not found")
             return JSONResponse({"detail": detail}, status_code=404)
-        index = settings.static_dir / "index.html"
-        if index.exists():
-            return FileResponse(index)
-        return JSONResponse({"detail": "Frontend not built"}, status_code=404)
+        return spa_page(request)
+
+    @app.get("/join")
+    async def join_page(request: Request):
+        return spa_page(request)
+
+    @app.get("/join/{code}")
+    async def join_code_page(request: Request, code: str):
+        return spa_page(request, code)
 
     if (settings.static_dir / "assets").exists():
         app.mount("/assets", StaticFiles(directory=settings.static_dir / "assets"), name="assets")
+    if (settings.static_dir / "banners").exists():
+        app.mount("/banners", StaticFiles(directory=settings.static_dir / "banners"), name="banners")
 
     @app.get("/")
-    async def root():
-        index = settings.static_dir / "index.html"
-        if index.exists():
-            return FileResponse(index)
-        return JSONResponse({"detail": "Frontend not built. API is at /api."})
+    async def root(request: Request):
+        return spa_page(request)
 
     for static_file, media_type in STATIC_FILES.items():
         path: Path = settings.static_dir / static_file

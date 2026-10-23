@@ -341,3 +341,40 @@ test("Superset ideas on phones and backups in Host admin", async ({ browser }) =
   expect(names).not.toContain("Made after the backup");
   expect(names).toContain("Ideas Night");
 });
+
+test("Main Stage banner on the TV and phones, a swapped-in upload and the join link preview", async ({ browser, request }) => {
+  const { ctx, ev, api } = await hostWithEvent(browser, "Festival Night");
+  await api.put("/api/host/appearance", { data: { scheme: "stage" } });
+  const tv = await openTv(ctx, ev);
+  await expect(tv.locator("html")).toHaveAttribute("data-banner", "");
+  expect(await tv.locator(".tv-top").evaluate((el) => getComputedStyle(el).backgroundImage)).toContain("/banners/main-stage.jpg");
+  expect(await tv.locator(".idle-overlay").evaluate((el) => getComputedStyle(el).backgroundImage)).toContain("/banners/main-stage.jpg");
+
+  const joinCtx = await phoneContext(browser);
+  const join = await joinCtx.newPage();
+  await join.goto(`/join/${ev.join_code}`);
+  await expect(join.locator(".join-hero")).toBeVisible();
+  const page = await (await request.get(`/join/${ev.join_code}`)).text();
+  expect(page).toContain('content="Join Festival Night on Karoulette"');
+  expect(page).toMatch(/og:image" content="http[^"]+\/banners\/main-stage-og\.jpg"/);
+
+  // Upload a banner in Host admin, then show it with every skin.
+  const admin = await ctx.newPage();
+  await admin.goto("/host/admin");
+  await admin.getByRole("button", { name: "Appearance" }).click();
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  await admin.getByTestId("banner-file").setInputFiles({ name: "ours.png", mimeType: "image/png", buffer: png });
+  await expect(admin.locator(".toast")).toContainText("New banner is up");
+  await expect(admin.getByText("Your uploaded banner")).toBeVisible();
+  await expect.poll(() => tv.locator(".tv-top").evaluate((el) => getComputedStyle(el).backgroundImage)).toContain("/api/public/banner?v=");
+  await admin.getByText("Show my banner with every skin").click();
+  await api.put("/api/host/appearance", { data: { scheme: "neon" } });
+  await expect(tv.locator("html")).toHaveAttribute("data-scheme", "neon");
+  await expect(tv.locator("html")).toHaveAttribute("data-banner", "");
+
+  // Remove it: Neon goes back to no banner at all.
+  admin.on("dialog", (d) => d.accept());
+  await admin.getByRole("button", { name: "Remove my banner" }).click();
+  await expect(tv.locator("html")).not.toHaveAttribute("data-banner", "");
+  await api.put("/api/host/appearance/banner-all", { data: { on: false } });
+});

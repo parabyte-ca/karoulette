@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, guestSession } from "../lib/api";
-import { applyScheme } from "../lib/schemes";
+import { applyAppearance, useBanner } from "../lib/schemes";
 import { useCountdown, useEventSocket } from "../lib/useEventSocket";
 import { decodeEntities, formatDuration } from "../lib/format";
 import ThemeSpinner from "../components/ThemeSpinner";
@@ -19,6 +19,7 @@ function JoinForm({ initialCode, onJoined }) {
   const [eventName, setEventName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const { banner_small: hero } = useBanner();
 
   useEffect(() => {
     setEventName("");
@@ -48,6 +49,7 @@ function JoinForm({ initialCode, onJoined }) {
   return (
     <main className="phone center-page">
       <form className="card narrow" onSubmit={submit}>
+        {hero && <div className="join-hero" aria-hidden="true" />}
         <h1 className="brand small">Kar<span>oulette</span></h1>
         {eventName ? <h2>Join {eventName}</h2> : <h2>Join the party</h2>}
         <label className="field">
@@ -298,7 +300,7 @@ function GuestHome({ me, onLeave }) {
   const { state, connected, serverNow } = useEventSocket(me.event.join_code, {
     token: guestSession.token, onMessage, onAuthError: onLeave,
   });
-  useEffect(() => { if (state?.appearance) applyScheme(state.appearance.scheme); }, [state?.appearance?.scheme]);
+  useEffect(() => { applyAppearance(state?.appearance); }, [state?.appearance]);
   const round = state?.round;
   const spinLeft = useCountdown(round?.spun_at ? round.spun_at + round.spin_seconds : null, serverNow, 0);
   const readyLeft = useCountdown(state?.now_playing?.starts_at || null, serverNow, 0);

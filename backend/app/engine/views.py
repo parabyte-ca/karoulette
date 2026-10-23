@@ -6,7 +6,8 @@ import io
 from datetime import datetime, timezone
 
 from .. import logic
-from .constants import ACTIVE_QUEUE_STATUSES, COLOUR_SCHEMES, DEFAULT_SCHEME, REACTIONS, UNKNOWN_DURATION_S, EngineError
+from .constants import (ACTIVE_QUEUE_STATUSES, COLOUR_SCHEMES, DEFAULT_SCHEME, REACTIONS, STAGE_BANNER,
+                        UNKNOWN_DURATION_S, EngineError)
 
 
 class ViewsMixin:
@@ -185,8 +186,29 @@ class ViewsMixin:
                 if g["status"] != "removed"]
 
     def appearance(self) -> dict:
+        """The colour scheme and banner every screen uses. Main Stage always has a banner (yours if you've
+        uploaded one, else its built-in photo); other schemes show an uploaded banner only if asked to."""
         scheme = self.db.get_setting("colour_scheme", DEFAULT_SCHEME)
-        return {"scheme": scheme if scheme in COLOUR_SCHEMES else DEFAULT_SCHEME}
+        scheme = scheme if scheme in COLOUR_SCHEMES else DEFAULT_SCHEME
+        custom = self.db.get_setting("banner_custom")
+        banner_all = bool(self.db.get_setting("banner_all", False))
+        url = f"/api/public/banner?v={custom['version']}" if custom else None
+        out = {"scheme": scheme, "custom_banner": bool(custom), "custom_url": url, "banner_all": banner_all,
+               "banner": None, "banner_small": None, "og_image": None}
+        if custom and (scheme == "stage" or banner_all):
+            out.update(banner=url, banner_small=url, og_image=url)
+        elif scheme == "stage":
+            out.update(STAGE_BANNER)
+        return out
+
+    def set_banner(self, ext: str | None) -> dict:
+        """Record (or clear) an uploaded banner; the file itself is kept in the data folder by the server."""
+        self.db.set_setting("banner_custom", {"ext": ext, "version": int(self.clock())} if ext else None)
+        return self.appearance()
+
+    def set_banner_all(self, on: bool) -> dict:
+        self.db.set_setting("banner_all", bool(on))
+        return self.appearance()
 
     def set_scheme(self, scheme: str) -> dict:
         if scheme not in COLOUR_SCHEMES:

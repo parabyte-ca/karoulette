@@ -105,12 +105,12 @@ def test_updates_endpoints_need_host(client):
 
 
 def test_colour_scheme_setting(client):
-    assert client.get("/api/public/appearance").json() == {"scheme": "neon"}
+    assert client.get("/api/public/appearance").json()["scheme"] == "neon"
     assert client.put("/api/host/appearance", json={"scheme": "aurora"}).status_code == 401
     login(client)
     assert client.put("/api/host/appearance", json={"scheme": "nope"}).status_code == 400
-    assert client.put("/api/host/appearance", json={"scheme": "synthwave"}).json() == {"scheme": "synthwave"}
-    assert client.get("/api/public/appearance").json() == {"scheme": "synthwave"}
+    assert client.put("/api/host/appearance", json={"scheme": "synthwave"}).json()["scheme"] == "synthwave"
+    assert client.get("/api/public/appearance").json()["scheme"] == "synthwave"
     code = client.post("/api/host/events", json={"name": "Look"}).json()["join_code"]
     token = client.post("/api/guest/join", json={"code": code, "name": "Ana"}).json()["token"]
     with client.websocket_connect(f"/ws/{code}?token={token}") as ws:

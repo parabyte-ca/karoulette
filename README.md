@@ -36,7 +36,8 @@ Karoulette runs your karaoke party from one TV and everyone's phones. The TV (ho
 - **Real-time sync** over WebSockets; full state persisted in SQLite so a restart resumes the event, queue and all.
 - **Multiple events** with a start/end lifecycle and a short join code. Song history per event with **CSV export**.
 - **Duplicate prevention** per event (host-configurable).
-- **Six colour schemes**, switchable live from Host admin → Appearance (TV, phones and admin repaint instantly, even mid-event): **Neon Night** (original), **On Air** (broadcast studio), **Synthwave Sunset** (80s outrun), **Velvet Lounge** (jazz club), **Northern Lights** (Canadian aurora) and **Mirror Ball** (70s disco, with light flecks sweeping the room). Each has its own background art and display font, and all stay dark and high-contrast.
+- **Seven colour schemes**, switchable live from Host admin → Appearance (TV, phones and admin repaint instantly, even mid-event): **Neon Night** (original), **On Air** (broadcast studio), **Synthwave Sunset** (80s outrun), **Velvet Lounge** (jazz club), **Northern Lights** (Canadian aurora), **Mirror Ball** (70s disco, with light flecks sweeping the room) and **Main Stage** (a festival headliner with a band photo across the top like a marquee). Each has its own background art and display font, and all stay dark and high-contrast.
+- **Banner photo**: Main Stage's band photo, or upload your own and show it with any skin. It runs across the top of the TV, behind the QR and smoke break screens, on the recap, on guests' phones and in the preview when the join link is shared.
 - **Backups in Host admin**: make and download a backup any time, restore one from the list (including the automatic pre-upgrade backups) or from a file. The current database is saved first, so a restore can be undone.
 - **Health check** at `/api/health` that checks the database (for Docker and monitors like Uptime Kuma; see below).
 - **Updates from the admin page** (same model as project-glasshaus): a daily check for new GitHub releases, the running version and any new release shown in Host admin, release notes, and a one-click **Upgrade** that a small host helper carries out with a database backup, health check and automatic rollback.
@@ -105,7 +106,7 @@ All settings live in `.env` (see `.env.example`).
 | `HOST_PIN` | _(required)_ | Host PIN or password, 4+ characters. When set, it always wins over a PIN changed in admin |
 | `YOUTUBE_API_KEY` | _(blank)_ | YouTube Data API v3 key. Blank = yt-dlp fallback search |
 | `YOUTUBE_DAILY_QUOTA` | `10000` | Daily quota used for the remaining-quota estimate |
-| `PUBLIC_BASE_URL` | _(blank)_ | Site address used in the QR code, e.g. `https://karaoke.example.ca` (just the root; a pasted `/join` or `/host` is stripped). Blank = the address the TV used |
+| `PUBLIC_BASE_URL` | _(blank)_ | Site address used in the QR code and join link previews, e.g. `https://karaoke.example.ca` (just the root; a pasted `/join` or `/host` is stripped). Blank = the address the TV used |
 | `SECRET_KEY` | _(generated)_ | Signs host session cookies |
 | `ENABLE_YTDLP` | `true` | Allow the yt-dlp metadata fallback |
 | `UPDATE_CHECK` | `true` | Daily check for new releases (Host admin → Updates) |
@@ -139,7 +140,7 @@ All settings live in `.env` (see `.env.example`).
 - **Events**: settings, singer order (move up/down, **Bouche!**, rejoin codes), round themes, phone remote, CSV export, delete.
 - **Themes**: add, edit, weight, enable/disable, delete.
 - **YouTube**: search mode and estimated quota left today.
-- **Appearance**: live mini-mockups of each colour scheme; one click switches every screen.
+- **Appearance**: live mini-mockups of each colour scheme; one click switches every screen. Upload a banner photo (JPEG, PNG or WebP, up to 8 MB), remove it, or show it with every skin.
 - **Updates**: running version, latest release and notes, check now, one-click upgrade with live progress and log.
 - **Backups**: make and download a backup, restore from the list or a file, delete old ones.
 - **Security**: change the PIN (when not set by `HOST_PIN`), sign out.
