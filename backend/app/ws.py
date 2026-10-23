@@ -43,6 +43,12 @@ class Hub:
         except Exception:
             self.remove(event_id, client)
 
+    async def send_screens(self, event_id: int, message: dict) -> None:
+        """Only to host connections (the TV and the host remote)."""
+        text = json.dumps(message)
+        targets = [c for c in list(self.rooms.get(event_id, ())) if c.role in ("host", "screen")]
+        await asyncio.gather(*(self._send(event_id, c, text) for c in targets))
+
     async def send(self, event_id: int, message: dict, guest_id: int | None = None) -> None:
         text = json.dumps(message)
         targets = [c for c in list(self.rooms.get(event_id, ()))

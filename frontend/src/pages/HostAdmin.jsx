@@ -38,18 +38,19 @@ function ThemesTab({ push }) {
   return (
     <section className="card">
       <h2>Themes</h2>
-      <p className="muted">Each round spins one theme as guidance for everyone's picks. Weight makes a theme more (or less) likely to come up.
-        Disabled themes are never spun.</p>
+      <p className="muted">Themes are switched on per event (Host admin → Events). When they're on, each round spins one theme
+        as a suggestion; when they're off, singers pick freely. Supersets spin from this list too. Weight makes a theme
+        more (or less) likely to come up. Disabled themes are never spun.</p>
       <table className="table">
         <thead><tr><th>Name</th><th>Description</th><th>Weight</th><th>Enabled</th><th /></tr></thead>
         <tbody>
           {themes.map((t) => (editing?.id === t.id ? (
             <tr key={t.id}>
-              <td><input value={editing.name} maxLength={60} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></td>
-              <td><input value={editing.description} maxLength={280} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></td>
-              <td><input type="number" min="0" max="100" step="0.5" value={editing.weight}
+              <td data-label="Name"><input value={editing.name} maxLength={60} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></td>
+              <td data-label="Description"><input value={editing.description} maxLength={280} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></td>
+              <td data-label="Weight"><input type="number" min="0" max="100" step="0.5" value={editing.weight}
                          onChange={(e) => setEditing({ ...editing, weight: e.target.value })} /></td>
-              <td><input type="checkbox" checked={editing.enabled} onChange={(e) => setEditing({ ...editing, enabled: e.target.checked })} /></td>
+              <td data-label="Enabled"><input type="checkbox" checked={editing.enabled} onChange={(e) => setEditing({ ...editing, enabled: e.target.checked })} /></td>
               <td className="actions">
                 <button className="btn btn-primary" onClick={() => save(editing, t.id)}>Save</button>
                 <button className="btn" onClick={() => setEditing(null)}>Cancel</button>
@@ -57,10 +58,10 @@ function ThemesTab({ push }) {
             </tr>
           ) : (
             <tr key={t.id} className={t.enabled ? "" : "disabled"}>
-              <td><strong>{t.name}</strong></td>
-              <td className="muted">{t.description}</td>
-              <td>{t.weight}</td>
-              <td>
+              <td data-label="Name"><strong>{t.name}</strong></td>
+              <td data-label="Description" className="muted">{t.description}</td>
+              <td data-label="Weight">{t.weight}</td>
+              <td data-label="Enabled">
                 <input type="checkbox" checked={t.enabled} aria-label={`Enable ${t.name}`}
                        onChange={(e) => save({ ...t, enabled: e.target.checked }, t.id)} />
               </td>
@@ -92,12 +93,15 @@ function EventSettings({ eventId, push, onChanged }) {
   const [state, setState] = useState(null);
   const [cfg, setCfg] = useState(null);
   const [name, setName] = useState("");
+  const [codes, setCodes] = useState({});
 
   const load = () => api(`/api/host/events/${eventId}/state`).then((s) => {
     setState(s);
     setCfg({ ...s.event.config, superset_chance: Math.round(s.event.config.superset_chance * 100) });
     setName(s.event.name);
-  }).catch((e) => push(e.message, "error"));
+    return api(`/api/host/events/${eventId}/guests`);
+  }).then((gs) => setCodes(Object.fromEntries(gs.map((g) => [g.id, g.rejoin_code]))))
+    .catch((e) => push(e.message, "error"));
   useEffect(() => { load(); }, [eventId]);
 
   if (!state || !cfg) return <p className="muted">Loading…</p>;
@@ -114,6 +118,9 @@ function EventSettings({ eventId, push, onChanged }) {
             superset_chance: Number(cfg.superset_chance) / 100,
             recent_theme_window: Number(cfg.recent_theme_window),
             max_duration_s: Number(cfg.max_duration_s),
+            ready_seconds: Number(cfg.ready_seconds),
+            superset_vote_seconds: Number(cfg.superset_vote_seconds),
+            max_songs_per_singer: Number(cfg.max_songs_per_singer),
           },
         },
       });
@@ -126,7 +133,7 @@ function EventSettings({ eventId, push, onChanged }) {
   };
 
   const guestAction = async (g, action) => {
-    if (action === "remove" && !window.confirm(`Remove ${g.name}? Their queued songs are removed too.`)) return;
+    if (action === "remove" && !window.confirm(`Bouche ${g.name}? Their queued songs go too, and the TV lets everyone know.`)) return;
     try {
       await api(`/api/host/events/${eventId}/guests/${g.id}/${action}`, { method: "POST" });
       load();
@@ -160,9 +167,12 @@ function EventSettings({ eventId, push, onChanged }) {
         <div className="grid">
           <label className="field"><span>Event name</span>
             <input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} /></label>
-          {field("superset_chance", "Superset chance per round (%)", { type: "number", min: 0, max: 100 })}
-          {field("recent_theme_window", "Avoid themes used in the last N turns", { type: "number", min: 0, max: 20 })}
+          {field("superset_chance", "Random Superset chance per round (%)", { type: "number", min: 0, max: 100 })}
+          {field("recent_theme_window", "Avoid themes used in the last N rounds", { type: "number", min: 0, max: 20 })}
           {field("max_duration_s", "Longest video allowed (seconds, 0 = no limit)", { type: "number", min: 0, max: 3600 })}
+          {field("ready_seconds", "“Get ready” countdown before each song (seconds, 0 = off)", { type: "number", min: 0, max: 60 })}
+          {field("max_songs_per_singer", "Songs each singer can have waiting (0 = no limit)", { type: "number", min: 0, max: 50 })}
+          {field("superset_vote_seconds", "How long a singer's Superset vote stays open (seconds)", { type: "number", min: 15, max: 300 })}
           <label className="field"><span>Safe search</span>
             <select value={cfg.safe_search} onChange={(e) => setCfg({ ...cfg, safe_search: e.target.value })}>
               <option value="none">Off</option>
@@ -171,11 +181,13 @@ function EventSettings({ eventId, push, onChanged }) {
             </select>
           </label>
         </div>
+        {toggle("themes_enabled", "Themes: spin a theme each round as a suggestion (off: singers pick freely)")}
         {toggle("prevent_duplicates", "Prevent the same song twice in one event")}
         {toggle("autoplay", "Start playing automatically when the first song is queued")}
-        <div className="row">
+        <div className="row wrap">
           <button className="btn btn-primary">Save settings</button>
           <Link className="btn" to={`/host/event/${eventId}`}>Open TV screen</Link>
+          <Link className="btn" to={`/host/remote/${eventId}`}>📱 Phone remote</Link>
           <a className="btn" href={`/api/host/events/${eventId}/history.csv`}>Export song history (CSV)</a>
           <span className="spacer" />
           <button type="button" className="btn btn-danger" onClick={del}>Delete event</button>
@@ -185,7 +197,8 @@ function EventSettings({ eventId, push, onChanged }) {
       <section className="card">
         <h2>Singer order ({state.guests.length})</h2>
         <p className="muted small">Songs play one per singer per round, in this order. New singers who join mid-event
-          are slotted in right after whoever is singing.</p>
+          go to the end of the order. A singer who switches phones can rejoin with the code shown
+          beside their name.</p>
         {!state.guests.length && <p className="muted">Nobody has joined yet.</p>}
         <ol className="list">
           {state.guests.map((g, idx) => (
@@ -195,13 +208,14 @@ function EventSettings({ eventId, push, onChanged }) {
                 {state.now_playing?.guest_id === g.id && <span className="pill">Singing</span>}
                 {g.new_singer && <span className="pill">New singer</span>}
                 <span className="muted small"> · {g.queued} queued</span>
+                {codes[g.id] && <span className="muted small" title="Rejoin code: lets this singer switch phones"> · rejoin <code>{codes[g.id]}</code></span>}
               </span>
               <span className="actions">
                 <button className="btn" title="Earlier in the order" disabled={idx === 0}
                         onClick={() => guestAction(g, "up")}>▲</button>
                 <button className="btn" title="Later in the order" disabled={idx === state.guests.length - 1}
                         onClick={() => guestAction(g, "down")}>▼</button>
-                <button className="btn btn-danger" onClick={() => guestAction(g, "remove")}>Remove</button>
+                <button className="btn btn-danger" title="Remove this singer from the event" onClick={() => guestAction(g, "remove")}>Bouche!</button>
               </span>
             </li>
           ))}
@@ -209,14 +223,24 @@ function EventSettings({ eventId, push, onChanged }) {
       </section>
 
       <section className="card">
-        <h2>Round themes</h2>
-        {!state.rounds.length && <p className="muted">No rounds yet. Round 1 spins when the event starts.</p>}
-        <ul className="list compact">
-          {state.rounds.map((r) => (
-            <li key={r.number}>Round {r.number}: <strong>{r.theme || "—"}</strong>
-              {r.is_superset && <span className="pill">Superset</span>}</li>
-          ))}
-        </ul>
+        <h2>Themes and Supersets</h2>
+        {!cfg.themes_enabled && <p className="muted small">Themes are off: singers pick freely. Supersets still spin a
+          theme (or take one from the song that kicks them off).</p>}
+        {state.rounds.length > 0 && (
+          <ul className="list compact">
+            {state.rounds.map((r) => <li key={r.number}>Round {r.number}: <strong>{r.theme}</strong></li>)}
+          </ul>
+        )}
+        {state.superset_history.length > 0 && (
+          <ul className="list compact">
+            {state.superset_history.map((x, n) => (
+              <li key={n}>★ Superset: <strong>{x.theme}</strong>
+                <span className="pill">{{ vote: "voted in", host: "by the host", random: "random" }[x.source]}</span>
+                {x.status !== "done" && <span className="pill">{x.status === "active" ? "under way" : "cancelled"}</span>}</li>
+            ))}
+          </ul>
+        )}
+        {!state.rounds.length && !state.superset_history.length && <p className="muted">Nothing yet.</p>}
       </section>
     </>
   );

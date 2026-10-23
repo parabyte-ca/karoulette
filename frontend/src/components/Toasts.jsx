@@ -4,7 +4,7 @@ export function useToasts() {
   const [toasts, setToasts] = useState([]);
   const push = useCallback((text, level = "info", ms = 6000) => {
     const id = Math.random().toString(36).slice(2);
-    setToasts((t) => [...t.slice(-3), { id, text, level }]);
+    setToasts((t) => [...t.slice(-2), { id, text, level }]); // three at most, so they never bury the page
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ms);
   }, []);
   return { toasts, push };

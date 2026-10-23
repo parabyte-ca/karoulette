@@ -1,32 +1,43 @@
 # Karoulette
-> Karaoke meets roulette. Self-hosted, multi-user karaoke night: guests join by QR code, take turns in a fixed rotation, spin a theme and queue YouTube karaoke videos that play on the TV.
+> Karaoke meets roulette. Self-hosted, multi-user karaoke night: guests join by QR code, queue YouTube karaoke videos from their phones, and sing one song per round in a fair rotation while a theme roulette spins each round.
 
-![Version](https://img.shields.io/badge/version-0.6.0-blue)
+![Version](https://img.shields.io/badge/version-0.7.0-blue)
 
 ## Overview
-Karoulette runs your karaoke party from one TV and everyone's phones. The TV (host screen) plays YouTube karaoke videos through the official YouTube player in a browser signed into YouTube Premium, so there are no ads. Guests scan a QR code, pick a display name and wait for their turn; when it comes, a theme randomizer spins and they search for a karaoke version that fits. Everything syncs in real time and survives a container restart.
+Karoulette runs your karaoke party from one TV and everyone's phones. The TV (host screen) plays YouTube karaoke videos through the official YouTube player in a browser signed into YouTube Premium, so there are no ads. Guests scan a QR code, pick a display name and add as many songs as they like; the queue plays one song per singer per round, and each round spins a theme for everyone's picks. Everything syncs in real time and survives a container restart.
 
 ## Features
 - **Host / TV screen** (`/host`): full-screen YouTube player, current singer, up next, queue, round and theme, QR code, join URL and code. High-contrast dark layout readable from across the room.
 - **YouTube Premium checklist** on first load of the TV screen in each browser session.
-- **Host controls**: start event, play/pause video, skip song, re-spin the round's theme, force or cancel a Superset, "play next" or remove any song, move singers up/down the order, remove guests, end event. Keyboard shortcuts on the TV: <kbd>Space</kbd> play/pause, <kbd>N</kbd> skip song, <kbd>S</kbd> re-spin, <kbd>H</kbd> show/hide controls.
-- **Guest phone UI** (`/join`): mobile-first, no accounts (session token in `localStorage`), song search that's always open, "My songs" with each song's place in the queue, the round's theme, full queue and singer order, "you're up next" and "you're singing now" prompts with vibration.
+- **Host controls**: start event, play/pause video, skip song, re-spin the round's theme, force or cancel a Superset, "play next" or remove any song, move singers up/down the order, **Bouche!** a singer (removes them, and the TV announces "[singer] has been BOUCHED!"), end event. Keyboard shortcuts on the TV: <kbd>Space</kbd> play/pause, <kbd>N</kbd> skip song, <kbd>S</kbd> re-spin, <kbd>G</kbd> start the song now, <kbd>P</kbd> pause/resume the queue, <kbd>H</kbd> show/hide controls.
+- **Smoke break!** **🚬 Pause queue** (TV or remote) stops the song, puts it back at the front and holds the queue; the TV shows "Smoke break!" and phones say the music's on hold until **Resume**. Guests can keep adding songs.
+- **"Get ready" screen**: before each song the TV shows the singer's name, the song and a countdown (default 5 seconds, set per event in Host admin; 0 turns it off) so they can reach the mic. **Start now** skips the rest.
+- **Host remote** (`/host/remote/<event>`): control the night from your phone: pause/play, volume up/down, skip, stop, smoke break, start the song now, re-spin, Supersets, play next and remove. Scan the QR code from the TV's **📱 Remote** button and sign in with the host PIN.
+- **Guest phone UI** (`/join`): mobile-first, no accounts (session token in `localStorage`), song search that's always open, "My songs" with each song's place in the queue and an **estimated wait** ("≈ 8 min"), the round's theme, full queue and singer order.
+- **Nearly-up alerts**: phones show and vibrate "two songs to go", "you're up next" and "you're up!". Tap **🔔 Buzz me when I'm nearly up** for system notifications while the phone is locked or on another app (needs HTTPS; on iPhone, install the app first).
+- **Duets**: when adding a song, pick "As a duet with …" to sing it with another guest. Both names show on the TV, both phones get the alerts, and the partner can step out. The song counts as the picker's turn.
+- **Crowd reactions**: while someone sings, phones get a row of 👏 🔥 😂 ❤️ 🎉 🤘 buttons; each tap floats up the TV with the sender's name (rate limited, never stored).
+- **End-of-night recap** on the TV and every phone: songs sung, singers, minutes of music, rounds, duets, most songs, top themes, Superset stars, who opened and closed the night, and each guest's own count.
+- **Rejoin code**: each guest gets a six-character code (bottom of their phone screen, and beside their name in Host admin). On a new phone, "Switched phones? Rejoin with your code" brings back their name, place and songs, and signs the old phone out.
+- **Installable app**: phones can add Karoulette to the home screen (web app manifest, icons and a small service worker that never caches live data). Needs HTTPS, e.g. through your reverse proxy.
 - **Add songs any time, as many as you like**: no waiting for a turn. The queue is a fair round-robin: each singer gets one song per round, and every round follows the singer order. A singer with five songs queued sings one per round, interleaved with everyone else.
-- **Singer order** is join order. **New singers** who join after singing has started are slotted in **next in line** (right after whoever is on the mic, behind any other newcomers still waiting), and the TV announces them with a "NEW SINGER!" banner when their first song starts. Guests can leave; the host can move singers up or down or remove them.
+- **Singer order** is join order. **New singers** who join after singing has started go to the **end of the singer order** (no jumping the line: their first song plays at the end of the current round), and the TV announces them with a "NEW SINGER!" banner when it starts. Guests can leave; the host can move singers up or down or bouche them.
 - **Your songs, your way**: a singer can move one of their songs ahead of their own others, remove it, or, when it's up next, tap **"Not ready? Let the next singer go first"** to let exactly one song go ahead.
-- **Themes** with a CRUD admin page (name, description, weight, enabled). No theme repeats back to back; optionally avoid the last _N_ themes. Seeded with 80s, Duets, From a Soundtrack, Canadiana, 90s, Power Ballads, Guilty Pleasures, One-Hit Wonders.
-- **One theme per round**: each pass through the singer order spins a theme (animated on the TV and phones) as a suggestion for everyone's picks.
-- **Superset rounds**: at the start of each round there is a configurable chance (default 15 %) of a Superset: one theme for everyone that round, a gold banner and sweep animation on the TV and phones, and guests/host can flag off-theme picks. Host can force the next round to be a Superset or cancel one.
+- **Themes are optional**: a per-event switch (Host admin → Events, **off by default**, so singers pick freely). When on, each pass through the singer order spins a theme (animated on the TV and phones) as a suggestion. The theme list has a CRUD admin page (name, description, weight, enabled); no theme repeats back to back, and the last _N_ can be avoided. Seeded with 80s, Duets, From a Soundtrack, Canadiana, 90s, Power Ballads, Guilty Pleasures, One-Hit Wonders.
+- **Supersets**: a bonus set where everyone picks one extra song that fits one theme, sung once round the singer order (carrying on from the rotation), then the regular queue picks up exactly where it left off.
+  - **Any singer can call one** from their phone; everyone else votes (60 seconds by default, tally live on the TV) and the majority of votes wins. Each singer can call one per round. The host can declare or cancel one from the TV or remote, and an optional random chance per round (default 0 %) is in Host admin.
+  - Whoever calls it chooses: **Start now**: the song playing kicks it off and the theme becomes "Songs like ⟨that song⟩"; or **After this song**: a theme is spun from the list.
+  - Every phone shows the theme and the line-up; a singer's next pick becomes their Superset song (a bonus outside the song limit). The set **waits** for each singer to pick when their turn comes (the TV shows "Waiting for … to pick"); singers can **sit it out** and the host can skip a turn. Off-theme Superset songs can be flagged.
 - **YouTube search** via the Data API v3 (`type=video`, `videoEmbeddable=true`, `videoSyndicated=true`, configurable SafeSearch), "karaoke" added automatically, 24-hour SQLite cache, quota meter in admin and graceful `quotaExceeded` handling. Falls back to **yt-dlp metadata-only search** (never downloads) when there's no key or the quota is gone.
 - **Pre-queue checks** with `videos.list`: duration and embeddability are confirmed before a song is added; optional maximum length.
 - **Embed errors** (IFrame codes 101/150 and others) auto-skip the song, notify the singer, and their next pick plays straight away.
 - **Real-time sync** over WebSockets; full state persisted in SQLite so a restart resumes the event, queue and all.
 - **Multiple events** with a start/end lifecycle and a short join code. Song history per event with **CSV export**.
 - **Duplicate prevention** per event (host-configurable).
-- **Five colour schemes**, switchable live from Host admin → Appearance (TV, phones and admin repaint instantly, even mid-event): **Neon Night** (original), **On Air** (broadcast studio), **Synthwave Sunset** (80s outrun), **Velvet Lounge** (jazz club) and **Northern Lights** (Canadian aurora). Each has its own background art and display font, and all stay dark and high-contrast.
+- **Six colour schemes**, switchable live from Host admin → Appearance (TV, phones and admin repaint instantly, even mid-event): **Neon Night** (original), **On Air** (broadcast studio), **Synthwave Sunset** (80s outrun), **Velvet Lounge** (jazz club), **Northern Lights** (Canadian aurora) and **Mirror Ball** (70s disco, with light flecks sweeping the room). Each has its own background art and display font, and all stay dark and high-contrast.
 - **Updates from the admin page** (same model as project-glasshaus): a daily check for new GitHub releases, the running version and any new release shown in Host admin, release notes, and a one-click **Upgrade** that a small host helper carries out with a database backup, health check and automatic rollback.
 - **Security**: host PIN (PBKDF2-hashed, HttpOnly signed session cookie), rate-limited search/join/login, validated inputs, API key never sent to browsers.
-- Automated tests for rotation, Superset and queue logic, plus a demo seed script.
+- Automated tests: backend unit and API tests, plus **browser tests** (Playwright) that drive a TV, phones and the host remote against a real server on every pull request. Demo seed script included.
 
 ## Requirements
 - Docker with Compose v2 (TrueNAS SCALE 24.10+ works out of the box)
@@ -99,7 +110,7 @@ All settings live in `.env` (see `.env.example`).
 | `KQ_IMAGE` / `KQ_TAG` | `parabyte-ca/karoulette` / `latest` | Image to run |
 | `TZ` | `America/Toronto` | Container time zone |
 
-**Per-event settings** (Host admin → Events): Superset chance (default 15 %), recent-theme window (default 3), prevent duplicate songs (default on), SafeSearch (off / moderate / strict), longest video allowed (default 15 min), autoplay.
+**Per-event settings** (Host admin → Events): **themes on/off** (default off), random Superset chance per round (default 0 %), Superset vote length (default 60 s), recent-theme window (default 3), prevent duplicate songs (default on), SafeSearch (off / moderate / strict), longest video allowed (default 15 min), autoplay, **"Get ready" countdown** (default 5 s, 0 = off) and **songs each singer can have waiting** (default 0 = no limit).
 
 **Quota maths**: a new search costs about 101 units (100 for `search.list` + 1 for `videos.list`), so the default 10,000-unit daily quota covers roughly 99 fresh searches; repeated searches within 24 hours are served from the cache for free. Quota resets at midnight Pacific time.
 
@@ -114,11 +125,11 @@ All settings live in `.env` (see `.env.example`).
 4. **Show the QR code**: it's on the TV with the join URL and a five-character code.
 5. **Guests join and add songs**: scan, enter a display name, and search. They can queue as many songs as they like, even before you start; the singer order is the order they joined.
 6. Press **▶ Start event**. Round 1's theme spins and the first song plays.
-7. Songs play automatically, one per singer per round. Latecomers slot in next in line and get a "NEW SINGER!" welcome. Use the control bar (move the mouse to show it) to skip, re-spin or put a song next.
-8. When you're done, **End event**, then export the song history from Host admin → Events → _Export song history (CSV)_.
+7. Songs play automatically, one per singer per round, each after a short "Get ready" countdown. Latecomers join the end of the order and get a "NEW SINGER!" welcome. Use the control bar (move the mouse to show it) to skip, re-spin, put a song next or call a **Smoke break!**, or press **📱 Remote** and scan the code to do it all from your phone.
+8. When you're done, **End event**: the TV and phones show the night's recap. Export the song history from Host admin → Events → _Export song history (CSV)_.
 
 ### Host admin (`/host/admin`)
-- **Events**: settings, singer order (move up/down, remove), round themes, CSV export, delete.
+- **Events**: settings, singer order (move up/down, **Bouche!**, rejoin codes), round themes, phone remote, CSV export, delete.
 - **Themes**: add, edit, weight, enable/disable, delete.
 - **YouTube**: search mode and estimated quota left today.
 - **Appearance**: live mini-mockups of each colour scheme; one click switches every screen.
@@ -141,13 +152,13 @@ Creates a "Demo Night" event with six guests, a few queued songs and history, an
             FastAPI (uvicorn, single process)
             ├─ REST  /api/public · /api/guest (bearer token) · /api/host (PIN cookie)
             ├─ WS    /ws/{join_code}  → full state snapshot + typed events
-            ├─ Engine: rotation, rounds, Supersets, queue, timers (persisted deadlines)
+            ├─ Engine: rotation, rounds, Supersets, queue, duets, recap (persisted state)
             ├─ YouTube service: Data API v3 → yt-dlp fallback, SQLite cache, quota ledger
             └─ SQLite (WAL) in /data  ·  serves the built React SPA
 ```
 
-- **Backend** (`backend/app`): `engine.py` is the only place event state changes; every mutation runs under one asyncio lock, is written to SQLite, and pushes typed messages (`guest_joined`, `new_singer`, `theme_spun`, `song_queued`, `now_playing`, `round_changed`, `superset`, `notice`…) followed by a full `state` snapshot. `logic.py` holds the pure ordering/theme/Superset rules that the tests target: each song is tagged with the round it belongs to (`assign_round`), and the queue is sorted by priority, round, then the singer's place in the order (`play_order`), so the order is always derived from data that survives a restart.
-- **Frontend** (`frontend/src`): React + Vite, no UI framework. `HostScreen` (TV), `HostAdmin`, `JoinApp` (phone). `useEventSocket` reconnects with backoff and corrects for clock skew.
+- **Backend** (`backend/app`): `engine.py` is the only place event state changes; every mutation runs under one asyncio lock, is written to SQLite, and pushes typed messages (`guest_joined`, `new_singer`, `theme_spun`, `song_queued`, `now_playing`, `round_changed`, `superset`, `superset_vote`, `bouched`, `queue_paused`, `notice`…) followed by a full `state` snapshot. `logic.py` holds the pure ordering/theme/Superset rules that the tests target: each song is tagged with the round it belongs to (`assign_round`), and the queue is sorted by priority, round, then the singer's place in the order (`play_order`), so the order is always derived from data that survives a restart. `vote_outcome` decides Superset votes and `set_order` lays out a Superset's turns; a one-second server tick closes votes whose time is up. A Superset's songs (`queue_items.set_id`) sit outside the regular queue until the set is done.
+- **Frontend** (`frontend/src`): React + Vite, no UI framework. `HostScreen` (TV), `HostRemote` (host's phone), `HostAdmin`, `JoinApp` (guest phone). `useEventSocket` reconnects with backoff and corrects for clock skew. `public/` holds the web app manifest, icons and service worker (`sw.js`, version-stamped by the server).
 - **YouTube**: playback only through the official IFrame Player on the host page; nothing is downloaded, proxied or ripped. Ad-free playback relies on the TV browser's Premium sign-in. Guests never play video.
 - **Data model**: `events`, `guests`, `themes`, `rounds`, `turns` (theme history), `queue_items` (song history), `flags`, `search_cache`, `video_cache`, `quota_ledger`, `settings`. See [`docs/PLAN.md`](docs/PLAN.md).
 - **Single worker by design**: timers and WebSocket rooms live in one process. One venue per instance is the target.
@@ -162,9 +173,13 @@ python -m pytest -q
 
 # Frontend (http://localhost:5173, proxies /api and /ws to :8095)
 cd frontend && npm install && npm run dev
+
+# Browser tests (starts its own server on :8097 with a throwaway database)
+cd frontend && npm run build && npx playwright install chromium
+KQ_PYTHON=../backend/.venv/bin/python npm run test:e2e
 ```
 
-CI (`.github/workflows/docker.yml`) runs the backend tests and frontend build, then builds a multi-arch image and pushes `ghcr.io/parabyte-ca/karoulette:<version>` and `:latest` on `main` (and `:<semver>` on `v*` tags).
+CI (`.github/workflows/docker.yml`) runs the backend tests, the frontend build and the browser tests, then builds a multi-arch image and pushes `ghcr.io/parabyte-ca/karoulette:<version>` and `:latest` on `main` (and `:<semver>` on `v*` tags).
 
 ## Changelog
 See [CHANGELOG.md](CHANGELOG.md).

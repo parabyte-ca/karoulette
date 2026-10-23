@@ -2,6 +2,7 @@ import { Link, Navigate, Route, Routes } from "react-router-dom";
 import HostGate from "./pages/HostGate";
 import EventPicker from "./pages/EventPicker";
 import HostScreen from "./pages/HostScreen";
+import HostRemote from "./pages/HostRemote";
 import HostAdmin from "./pages/HostAdmin";
 import JoinApp from "./pages/JoinApp";
 
@@ -27,6 +28,7 @@ export default function App() {
       <Route path="/host" element={<HostGate><EventPicker /></HostGate>} />
       <Route path="/host/admin" element={<HostGate><HostAdmin /></HostGate>} />
       <Route path="/host/event/:eventId" element={<HostGate><HostScreen /></HostGate>} />
+      <Route path="/host/remote/:eventId" element={<HostGate><HostRemote /></HostGate>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

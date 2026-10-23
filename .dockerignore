@@ -8,3 +8,6 @@ data
 .env
 *.db
 docs
+frontend/e2e
+frontend/test-results
+frontend/playwright-report

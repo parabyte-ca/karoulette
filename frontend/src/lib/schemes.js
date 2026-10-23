@@ -31,6 +31,12 @@ export const SCHEMES = [
     tagline: "A Canadian winter sky: drifting green and violet aurora over a starry navy night. A nod to Canadiana.",
     swatches: ["#050d1c", "#36f1a6", "#9d8cff", "#ffe57a"],
   },
+  {
+    id: "disco",
+    name: "Mirror Ball",
+    tagline: "A 70s disco: a spinning mirror ball scatters rays and flecks of hot pink, ice blue and gold across a dark dance floor.",
+    swatches: ["#0c0614", "#ff4fa3", "#7fe7ff", "#ffcc33"],
+  },
 ];
 
 const KEY = "kq_scheme";

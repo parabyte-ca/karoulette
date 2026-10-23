@@ -255,6 +255,103 @@
   color-scheme: dark;
 }
 
+/* ---------------------------------------------------------------- 6. Mirror Ball
+   A 70s disco: a mirror ball throws rays and flecks of light across a dark dance floor in hot pink,
+   ice blue and gold. Righteous lettering, like a roller-rink sign. */
+[data-scheme="disco"] {
+  --bg: #0c0614;
+  --bg-2: #160b22;
+  --card: rgba(28, 15, 42, 0.88);
+  --card-2: #2c1844;
+  --line: #4a2f6b;
+  --text: #fff8ee;
+  --muted: #cdbbe2;
+  --accent: #ff4fa3;
+  --accent-hover: #ff72b7;
+  --on-accent: #2a0016;
+  --accent-2: #7fe7ff;
+  --highlight: #ffcc33;
+  --on-highlight: #2a1a00;
+  --green: #52e3a0;
+  --red: #ff6b6b;
+  --orange: #ffae42;
+  --hover: #3a2158;
+  --input: #08040e;
+  --danger-bg: #561a36;
+  --danger-text: #ffd9ea;
+  --chrome: rgba(8, 3, 14, 0.55);
+  --chrome-strong: rgba(8, 3, 14, 0.8);
+  --glow-1: rgba(255, 79, 163, 0.55);
+  --glow-1-soft: rgba(255, 79, 163, 0.25);
+  --glow-2: rgba(127, 231, 255, 0.4);
+  --glow-hl: rgba(255, 204, 51, 0.6);
+  --highlight-wash: rgba(255, 204, 51, 0.09);
+  --spinner-bg: linear-gradient(180deg, #08040e, #3a2158 50%, #08040e);
+  --stage-bg:
+    radial-gradient(circle at 50% 9%, #ffffff 0, #e4e4f6 0.5em, #9a9abd 1.9em, #4a4a6c 2.8em, rgba(0, 0, 0, 0) 2.9em),
+    repeating-conic-gradient(from 0deg at 50% 9%, rgba(255, 255, 255, 0) 0 7deg, rgba(255, 255, 255, 0.07) 7deg 8deg),
+    conic-gradient(from 150deg at 50% 9%, rgba(0, 0, 0, 0) 0deg, rgba(255, 79, 163, 0.2) 8deg, rgba(0, 0, 0, 0) 16deg,
+      rgba(0, 0, 0, 0) 24deg, rgba(127, 231, 255, 0.18) 32deg, rgba(0, 0, 0, 0) 40deg, rgba(0, 0, 0, 0) 48deg,
+      rgba(255, 204, 51, 0.18) 56deg, rgba(0, 0, 0, 0) 64deg),
+    radial-gradient(3px 3px at 14% 62%, #ff4fa3 50%, transparent 51%),
+    radial-gradient(3px 3px at 33% 78%, #7fe7ff 50%, transparent 51%),
+    radial-gradient(2px 2px at 58% 70%, #ffcc33 50%, transparent 51%),
+    radial-gradient(3px 3px at 79% 84%, #ff4fa3 50%, transparent 51%),
+    radial-gradient(2px 2px at 90% 58%, #7fe7ff 50%, transparent 51%),
+    radial-gradient(ellipse 80% 30% at 50% 105%, rgba(255, 79, 163, 0.3), rgba(0, 0, 0, 0) 70%),
+    linear-gradient(180deg, #1a0b2a 0%, #0c0614 80%);
+  --bg-image:
+    repeating-conic-gradient(from 0deg at 50% -8%, rgba(255, 255, 255, 0) 0 9deg, rgba(255, 255, 255, 0.035) 9deg 10deg),
+    radial-gradient(2px 2px at 12% 30%, rgba(255, 79, 163, 0.9) 50%, transparent 51%),
+    radial-gradient(2px 2px at 27% 72%, rgba(127, 231, 255, 0.8) 50%, transparent 51%),
+    radial-gradient(2px 2px at 48% 44%, rgba(255, 204, 51, 0.8) 50%, transparent 51%),
+    radial-gradient(2px 2px at 71% 22%, rgba(127, 231, 255, 0.8) 50%, transparent 51%),
+    radial-gradient(2px 2px at 88% 66%, rgba(255, 79, 163, 0.9) 50%, transparent 51%),
+    radial-gradient(ellipse 60% 35% at 50% 0%, rgba(255, 79, 163, 0.16), rgba(0, 0, 0, 0) 70%);
+  --font-body: "Nunito", "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  --font-display: "Righteous", "Nunito", "Segoe UI", system-ui, sans-serif;
+  --display-tracking: 0.01em;
+  --display-case: none;
+  --radius: 18px;
+  --shadow: 0 0 0 1px rgba(255, 204, 51, 0.08), 0 14px 34px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+/* Flecks of light from the mirror ball sweep slowly round the room behind the TV. */
+[data-scheme="disco"] .tv::before {
+  content: "";
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 160vmax;
+  height: 160vmax;
+  margin: -80vmax 0 0 -80vmax;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(4px 4px at 20% 30%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(5px 5px at 35% 65%, rgba(255, 79, 163, 0.45) 50%, transparent 51%),
+    radial-gradient(4px 4px at 60% 25%, rgba(127, 231, 255, 0.45) 50%, transparent 51%),
+    radial-gradient(5px 5px at 75% 55%, rgba(255, 204, 51, 0.4) 50%, transparent 51%),
+    radial-gradient(4px 4px at 45% 85%, rgba(255, 255, 255, 0.4) 50%, transparent 51%),
+    radial-gradient(5px 5px at 85% 80%, rgba(127, 231, 255, 0.4) 50%, transparent 51%),
+    radial-gradient(4px 4px at 12% 75%, rgba(255, 204, 51, 0.4) 50%, transparent 51%);
+  background-size: 33% 33%;
+  animation: mirrorball 60s linear infinite;
+}
+@keyframes mirrorball { to { transform: rotate(360deg); } }
+[data-scheme="disco"] .tv > * { position: relative; z-index: 1; }
+
+/* Mirror Ball: gold-to-pink-to-ice lettering for the brand. */
+[data-scheme="disco"] .brand {
+  background: linear-gradient(90deg, #ffcc33 0%, #ff4fa3 50%, #7fe7ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+[data-scheme="disco"] .brand span { color: transparent; }
+[data-scheme="disco"] .brand .version-tag, [data-scheme="disco"] .brand .muted { -webkit-text-fill-color: var(--muted); }
+
 /* Aurora ribbons drift slowly behind the TV (respecting reduced motion via the global rule). */
 [data-scheme="aurora"] .tv::before {
   content: "";

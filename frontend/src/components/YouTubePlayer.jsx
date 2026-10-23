@@ -37,6 +37,15 @@ const YouTubePlayer = forwardRef(function YouTubePlayer({ videoId, itemId, onEnd
       if (p.getPlayerState() === 1) p.pauseVideo(); else p.playVideo();
     },
     restart: () => player.current?.seekTo?.(0, true),
+    /** Change the volume by `delta` (0 to 100); returns the new level. */
+    volume: (delta) => {
+      const p = player.current;
+      if (!p?.getVolume) return null;
+      const level = Math.min(100, Math.max(0, Math.round(p.getVolume() + delta)));
+      p.setVolume(level);
+      if (level > 0 && p.isMuted?.()) p.unMute();
+      return level;
+    },
     state: () => player.current?.getPlayerState?.() ?? -1,
   }));
 

@@ -1,4 +1,4 @@
-"""Pure, side-effect-free game logic: singer order, fair queue order, theme picking and superset rolls.
+"""Pure, side-effect-free game logic: singer order, fair queue order, theme picking, superset rolls and votes.
 
 Everything here works on plain dicts so it can be unit tested without a database.
 """
@@ -10,13 +10,17 @@ import unicodedata
 from typing import Iterable, Sequence
 
 DEFAULT_EVENT_CONFIG: dict = {
-    "superset_chance": 0.15,
+    "themes_enabled": False,     # spin a theme each round as a suggestion; off = singers pick freely
+    "superset_chance": 0.0,      # chance a new round opens with a Superset (they mostly come from votes)
     "recent_theme_window": 3,
     "prevent_duplicates": True,
     "safe_search": "moderate",   # none | moderate | strict
     "max_duration_s": 900,       # 0 disables the limit
     "autoplay": True,
     "spin_seconds": 5,
+    "ready_seconds": 5,          # "Get ready" countdown on the TV before each song; 0 turns it off
+    "max_songs_per_singer": 0,   # songs a singer may have waiting at once; 0 = no limit
+    "superset_vote_seconds": 60, # how long a guest-called Superset vote stays open
 }
 
 CONFIG_LIMITS: dict = {
@@ -24,6 +28,9 @@ CONFIG_LIMITS: dict = {
     "recent_theme_window": (0, 20),
     "max_duration_s": (0, 3600),
     "spin_seconds": (1, 15),
+    "ready_seconds": (0, 60),
+    "max_songs_per_singer": (0, 50),
+    "superset_vote_seconds": (15, 300),
 }
 
 
@@ -57,20 +64,6 @@ def ordered_active(guests: Iterable[dict]) -> list[dict]:
 def next_rotation_pos(guests: Iterable[dict]) -> int:
     positions = [g["rotation_pos"] for g in guests]
     return (max(positions) + 1) if positions else 1
-
-
-def newcomer_position(guests: Sequence[dict], anchor_pos: int | None, newcomer_id: int | None = None) -> int | None:
-    """Where a new singer goes: right after the singer on the mic (``anchor_pos``), behind any other
-    newcomers still waiting for their first song. ``None`` means "append to the end" (nobody has sung
-    in this round yet, so join order applies)."""
-    if anchor_pos is None:
-        return None
-    pos = anchor_pos + 1
-    waiting = {g["rotation_pos"] for g in ordered_active(guests)
-               if g.get("debut_pending") and g["id"] != newcomer_id}
-    while pos in waiting:
-        pos += 1
-    return pos
 
 
 # --------------------------------------------------------------------------- fair queue
@@ -129,12 +122,40 @@ def pick_theme(themes: Sequence[dict], history_ids: Sequence[int], window: int,
     return rng.choices(candidates, weights=weights, k=1)[0]
 
 
-def roll_superset(chance: float, pending: str | None, rng: random.Random) -> bool:
-    if pending == "force":
-        return True
-    if pending == "cancel":
-        return False
-    return rng.random() < chance
+def vote_outcome(yes: int, no: int, eligible: int, closing: bool = False) -> str | None:
+    """Result of a Superset vote among the other singers: "passed", "failed" or None (still open).
+
+    A majority of the votes cast wins; ties fail. It ends early once the result can't change: more than
+    half of everyone eligible said yes, at least half said no, or everyone has voted."""
+    if yes * 2 > eligible:
+        return "passed"
+    if no * 2 >= eligible or closing or yes + no >= eligible:
+        return "passed" if yes > no else "failed"
+    return None
+
+
+def roll_superset(chance: float, rng: random.Random) -> bool:
+    return chance > 0 and rng.random() < chance
+
+
+def set_order(guests: Sequence[dict], anchor_pos: int | None, include_anchor: bool) -> list[dict]:
+    """Singers in a Superset set: once round the singer order, carrying on from the rotation.
+
+    It starts after the singer at ``anchor_pos`` (or with them, when their song kicks the set off) and
+    wraps to the top, so nobody sings twice in a row."""
+    order = ordered_active(guests)
+    if anchor_pos is None:
+        return order
+    first = [g for g in order if g["rotation_pos"] > anchor_pos or (include_anchor and g["rotation_pos"] == anchor_pos)]
+    return first + [g for g in order if g not in first]
+
+
+def song_name(title: str) -> str:
+    """'Africa (Karaoke Version)' -> 'Africa': karaoke channels' extra words, for "Songs like …" themes."""
+    name = re.sub(r"\s*[\(\[][^)\]]*(karaoke|instrumental|lyrics|version|backing)[^)\]]*[\)\]]", "", title,
+                  flags=re.IGNORECASE)
+    name = re.sub(r"\s*[-|–]\s*(karaoke|instrumental|lyrics).*$", "", name, flags=re.IGNORECASE).strip()
+    return name or title.strip()
 
 
 # --------------------------------------------------------------------------- misc

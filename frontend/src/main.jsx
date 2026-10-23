@@ -4,8 +4,10 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./styles.css";
 import { initScheme } from "./lib/schemes";
+import { initPwa } from "./lib/pwa";
 
 initScheme();
+initPwa();
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>

@@ -75,7 +75,7 @@ def play_all(engine, event_id) -> list[str]:
 @pytest.fixture
 def make_event(engine):
     def _make(names=("Alex", "Blake", "Casey"), start=True, **config):
-        cfg = {"superset_chance": 0.0, "autoplay": False, **config}
+        cfg = {"superset_chance": 0.0, "autoplay": False, "themes_enabled": True, **config}
         ev = engine.create_event("Test Night", cfg)
         guests = [engine.join(ev["id"], n)[0] for n in names]
         if start:

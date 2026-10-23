@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import io
 import logging
 from pathlib import Path
 from typing import Any, Callable
@@ -16,7 +17,7 @@ from pydantic import BaseModel, Field
 from . import auth
 from .config import Settings
 from .db import Database
-from .engine import Engine, EngineError
+from .engine import REACTIONS, Engine, EngineError
 from .ratelimit import RateLimiter
 from .updates import UpdateError, UpdateService
 from .ws import Client, Hub
@@ -33,11 +34,29 @@ class JoinIn(BaseModel):
     name: str = Field(min_length=1, max_length=40)
 
 
+class RejoinIn(BaseModel):
+    code: str = Field(min_length=3, max_length=10)
+    rejoin_code: str = Field(min_length=1, max_length=12)
+
+
 class QueueIn(BaseModel):
     video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
     title: str | None = Field(default=None, max_length=300)
     channel: str | None = Field(default=None, max_length=200)
     thumbnail: str | None = Field(default=None, max_length=500)
+    duet_guest_id: int | None = None
+
+
+class VoteIn(BaseModel):
+    yes: bool
+
+
+class CallIn(BaseModel):
+    mode: str = Field(default="after", pattern=r"^(now|after)$")
+
+
+class ReactionIn(BaseModel):
+    emoji: str = Field(min_length=1, max_length=8)
 
 
 class AppearanceIn(BaseModel):
@@ -81,9 +100,16 @@ class PlayerIn(BaseModel):
 
 
 EVENT_ACTIONS: dict[str, str] = {
-    "start": "start_event", "end": "end_event", "spin": "force_spin", "superset-force": "force_superset",
-    "superset-cancel": "cancel_superset", "play-next": "play_next", "skip-song": "skip_song",
-    "stop-playback": "stop_playback",
+    "start": "start_event", "end": "end_event", "spin": "force_spin", "superset-cancel": "cancel_superset",
+    "superset-skip-turn": "skip_superset_turn", "play-next": "play_next", "skip-song": "skip_song",
+    "stop-playback": "stop_playback", "start-now": "start_now", "pause-queue": "pause_queue",
+    "resume-queue": "resume_queue",
+}
+VIDEO_ACTIONS: dict[str, str] = {"video-toggle": "toggle", "volume-up": "volume_up", "volume-down": "volume_down"}
+STATIC_FILES: dict[str, str | None] = {  # files served from the site root, with their media type
+    "favicon.svg": None, "robots.txt": None, "manifest.webmanifest": "application/manifest+json",
+    "sw.js": "text/javascript", "icon-192.png": None, "icon-512.png": None, "icon-maskable-512.png": None,
+    "apple-touch-icon.png": None,
 }
 
 
@@ -96,6 +122,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     db = Database(settings.db_path)
     engine = Engine(db)
     engine.seed_themes()
+    engine.upgrade_event_configs()
     auth.init_pin(db, settings.host_pin)
     yt = youtube or YouTubeService(db, settings.youtube_api_key, settings.youtube_daily_quota, settings.enable_ytdlp)
     upd = updates or UpdateService(db, settings.version, settings.source_repo, settings.upgrade_dir)
@@ -104,6 +131,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     limits = {
         "search_guest": RateLimiter(10, 60), "search_ip": RateLimiter(60, 60),
         "join": RateLimiter(15, 60), "login": RateLimiter(8, 60), "queue": RateLimiter(10, 60),
+        "react": RateLimiter(20, 10),
     }
 
     async def broadcast(messages: list[dict], extra_events: set[int] = frozenset()) -> None:
@@ -131,10 +159,11 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         return result
 
     async def ticker():
-        purge_at = 0.0
+        purge_at = asyncio.get_running_loop().time() + 30
         while True:
-            await asyncio.sleep(30)
+            await asyncio.sleep(1)
             try:
+                await run(engine.tick)  # Superset votes that have run out of time
                 loop_time = asyncio.get_running_loop().time()
                 if loop_time > purge_at:
                     yt.purge_cache()
@@ -219,16 +248,16 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     async def join_url(request: Request, code: str):
         return {"url": f"{base_url(request)}/join/{code.strip().upper()}"}
 
+    def qr_svg(url: str) -> Response:
+        out = io.BytesIO()
+        segno.make(url, error="m").save(out, kind="svg", scale=10, border=2, dark="#000000", light="#ffffff")
+        return Response(out.getvalue(), media_type="image/svg+xml")
+
     @app.get("/api/public/qr.svg")
     async def qr(request: Request, code: str):
         if not code.isalnum() or len(code) > 10:
             raise HTTPException(400, "Invalid code")
-        url = f"{base_url(request)}/join/{code.upper()}"
-        buf = segno.make(url, error="m")
-        import io
-        out = io.BytesIO()
-        buf.save(out, kind="svg", scale=10, border=2, dark="#000000", light="#ffffff")
-        return Response(out.getvalue(), media_type="image/svg+xml")
+        return qr_svg(f"{base_url(request)}/join/{code.upper()}")
 
     # ------------------------------------------------------------------ guest
 
@@ -240,13 +269,28 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         except EngineError as exc:
             raise HTTPException(exc.status, exc.message) from exc
         guest, token = await run(engine.join, ev["id"], body.name, event_id=ev["id"])
-        return {"token": token, "guest": {"id": guest["id"], "name": guest["display_name"]},
+        return {"token": token,
+                "guest": {"id": guest["id"], "name": guest["display_name"], "rejoin_code": guest["rejoin_code"]},
+                "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"]}}
+
+    @app.post("/api/guest/rejoin")
+    async def guest_rejoin(body: RejoinIn, request: Request):
+        limit("join", client_ip(request))
+        try:
+            ev = engine.event_by_code(body.code)
+        except EngineError as exc:
+            raise HTTPException(exc.status, exc.message) from exc
+        guest, token = await run(engine.rejoin, ev["id"], body.rejoin_code, event_id=ev["id"])
+        return {"token": token,
+                "guest": {"id": guest["id"], "name": guest["display_name"], "rejoin_code": guest["rejoin_code"]},
                 "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"]}}
 
     @app.get("/api/guest/me")
     async def guest_me(guest: dict = Depends(current_guest)):
         ev = engine.get_event(guest["event_id"])
-        return {"guest": {"id": guest["id"], "name": guest["display_name"]},
+        async with lock:
+            code = engine.rejoin_code(guest["id"])
+        return {"guest": {"id": guest["id"], "name": guest["display_name"], "rejoin_code": code},
                 "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"], "status": ev["status"]}}
 
     @app.get("/api/guest/state")
@@ -287,8 +331,38 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
             "thumbnail": info.get("thumbnail") or f"https://i.ytimg.com/vi/{body.video_id}/mqdefault.jpg",
             "duration_s": info.get("duration_s"),
         }
-        item = await run(engine.queue_song, guest["id"], video, event_id=guest["event_id"])
+        item = await run(engine.queue_song, guest["id"], video, body.duet_guest_id, event_id=guest["event_id"])
         return {"ok": True, "item_id": item["id"]}
+
+    @app.post("/api/guest/queue/{item_id}/leave-duet")
+    async def guest_leave_duet(item_id: int, guest: dict = Depends(current_guest)):
+        await run(engine.leave_duet, guest["id"], item_id, event_id=guest["event_id"])
+        return {"ok": True}
+
+    @app.post("/api/guest/superset/call")
+    async def guest_call_superset(body: CallIn | None = None, guest: dict = Depends(current_guest)):
+        await run(engine.call_superset_vote, guest["id"], (body or CallIn()).mode, event_id=guest["event_id"])
+        return {"ok": True}
+
+    @app.post("/api/guest/superset/pass")
+    async def guest_pass_superset(guest: dict = Depends(current_guest)):
+        await run(engine.pass_superset, guest["id"], event_id=guest["event_id"])
+        return {"ok": True}
+
+    @app.post("/api/guest/superset/vote")
+    async def guest_vote_superset(body: VoteIn, guest: dict = Depends(current_guest)):
+        await run(engine.vote_superset, guest["id"], body.yes, event_id=guest["event_id"])
+        return {"ok": True}
+
+    @app.post("/api/guest/react")
+    async def guest_react(body: ReactionIn, guest: dict = Depends(current_guest)):
+        if body.emoji not in REACTIONS:
+            raise HTTPException(422, "Pick one of the reaction buttons.")
+        limit("react", f"g{guest['id']}")
+        # Only the TV needs these: they float up the screen and are never stored.
+        await hub.send_screens(guest["event_id"], {"type": "reaction",
+                                                   "data": {"emoji": body.emoji, "name": guest["display_name"]}})
+        return {"ok": True}
 
     @app.post("/api/guest/queue/{item_id}/let-next-go-first")
     async def guest_let_next_go_first(item_id: int, guest: dict = Depends(current_guest)):
@@ -376,11 +450,28 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
 
     @app.post("/api/host/events/{event_id}/actions/{action}", dependencies=host)
     async def event_action(event_id: int, action: str):
+        if action in VIDEO_ACTIONS:
+            await run(engine.video_command, event_id, VIDEO_ACTIONS[action])
+            return {"ok": True}
+        if action in ("superset-now", "superset-after"):  # "now": this song kicks the set off
+            await run(engine.force_superset, event_id, action.split("-")[1], event_id=event_id)
+            return {"ok": True}
         method = EVENT_ACTIONS.get(action)
         if not method:
             raise HTTPException(404, "Unknown action")
         await run(getattr(engine, method), event_id, event_id=event_id)
         return {"ok": True}
+
+    @app.get("/api/host/events/{event_id}/guests", dependencies=host)
+    async def event_guests(event_id: int):
+        get_event_or_404(event_id)
+        async with lock:
+            return engine.guest_codes(event_id)
+
+    @app.get("/api/host/events/{event_id}/remote-qr.svg", dependencies=host)
+    async def remote_qr(request: Request, event_id: int):
+        get_event_or_404(event_id)
+        return qr_svg(f"{base_url(request)}/host/remote/{event_id}")
 
     @app.post("/api/host/events/{event_id}/queue/{item_id}/play-next", dependencies=host)
     async def play_item_next(event_id: int, item_id: int):
@@ -541,10 +632,19 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
             return FileResponse(index)
         return JSONResponse({"detail": "Frontend not built. API is at /api."})
 
-    for static_file in ("favicon.svg", "robots.txt"):
+    for static_file, media_type in STATIC_FILES.items():
         path: Path = settings.static_dir / static_file
-        if path.exists():
-            app.add_api_route(f"/{static_file}", (lambda p=path: FileResponse(p)), methods=["GET"])
+        if not path.exists():
+            continue
+        if static_file == "sw.js":
+            # Stamp the version so each release gets a fresh cache, and never let browsers cache the worker
+            # itself, so new releases reach installed phones.
+            worker = path.read_text().replace("__KAROULETTE_VERSION__", settings.version)
+            app.add_api_route("/sw.js", (lambda body=worker, m=media_type: Response(
+                body, media_type=m, headers={"Cache-Control": "no-cache"})), methods=["GET"])
+        else:
+            app.add_api_route(f"/{static_file}", (lambda p=path, m=media_type: FileResponse(p, media_type=m)),
+                              methods=["GET"])
 
     return app
 
