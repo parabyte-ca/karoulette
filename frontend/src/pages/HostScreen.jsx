@@ -295,7 +295,7 @@ export default function HostScreen() {
 
       <main className="tv-main">
         <section className="tv-stage">
-          <div className="player-wrap">
+          <div className={`player-wrap ${idle ? "is-idle" : ""}`}>
             <YouTubePlayer ref={playerRef} videoId={gettingReady ? null : nowPlaying?.video_id} itemId={nowPlaying?.id}
                            onStateChange={setPlayerState}
                            onEnded={(itemId) => call(`/api/host/events/${eventId}/player`,

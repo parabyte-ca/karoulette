@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.9.1] - 2026-10-23
+### Fixed
+- TV screen on a phone or narrow window: the "Scan to join" box, smoke break and recap were cut off between songs. The box now grows to fit them.
+
 ## [0.9.0] - 2026-10-23
 ### Added
 - **Main Stage** colour scheme: a summer festival headliner. A band photo runs across the top of the TV like a marquee (with chasing bulbs), in midnight stage blue, smoke red and amber spotlights, with bold concert-poster lettering and a slow stage haze.
