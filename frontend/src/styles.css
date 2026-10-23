@@ -259,6 +259,9 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
   .tv { height: auto; min-height: 100vh; }
   .player-wrap { aspect-ratio: 16 / 9; flex: none; }
   .idle-overlay { flex-direction: column; gap: 1em; text-align: center; }
+  /* Between songs on a narrow screen, the QR and join details stack, so let the box grow to fit them. */
+  .player-wrap.is-idle { aspect-ratio: auto; min-height: calc((100vw - 2em) * 9 / 16); }
+  .player-wrap.is-idle .idle-overlay { position: relative; inset: auto; min-height: inherit; }
 }
 
 @media (prefers-reduced-motion: reduce) {
