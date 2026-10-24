@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2] - 2026-10-24
+### Fixed
+- **Singers losing their turn and sliding to the bottom of the queue.** Three cases are fixed:
+  - When a singer's song couldn't play (blocked from embedding), their replacement song was counted in the next round, so they skipped a round and their next song landed at the very end. The replacement now takes the failed song's turn.
+  - While a song the host put first (**Play next**) was playing, anyone still to sing in that round who added a song was pushed to the next round.
+  - The same happened during a Superset turn.
+
 ## [0.9.1] - 2026-10-23
 ### Fixed
 - TV screen on a phone or narrow window: the "Scan to join" box, smoke break and recap were cut off between songs. The box now grows to fit them.

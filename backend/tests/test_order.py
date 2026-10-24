@@ -192,3 +192,47 @@ def test_duplicate_names_rejected(engine, make_event):
     eid, _ = make_event()
     with pytest.raises(EngineError):
         engine.join(eid, "alex")
+
+
+# ---- a singer must not lose their turn (fixed in 0.9.2)
+
+def test_repick_after_error_keeps_the_singers_turn(make_event, engine):
+    eid, (a, b, c, d) = make_event(("Alex", "Blake", "Casey", "Dana"))
+    for gst in (a, b, c, d):
+        add(engine, gst)
+    engine.play_next(eid)                                                    # Alex
+    engine.player_ended(eid, engine.get_event(eid)["now_playing_item_id"])   # Blake's song starts...
+    engine.player_error(eid, engine.get_event(eid)["now_playing_item_id"], 150)  # ...and can't play
+    repick = add(engine, b)
+    assert repick["round_no"] == 1   # the re-pick takes the failed song's turn
+    for gst in (a, c, d, b):
+        add(engine, gst)
+    # Blake sings in round 2 like everyone else, not after it.
+    assert singer_order(engine, eid) == ["Casey", "Blake", "Dana", "Alex", "Blake", "Casey", "Dana"]
+
+
+def test_play_next_does_not_cost_later_singers_their_turn(make_event, engine):
+    eid, (a, b, c, d) = make_event(("Alex", "Blake", "Casey", "Dana"))
+    for gst in (a, b, d):
+        add(engine, gst)
+    early = add(engine, d)              # Dana's round-2 song
+    engine.play_next(eid)               # Alex
+    engine.play_item_next(eid, early["id"])
+    engine.player_ended(eid, engine.get_event(eid)["now_playing_item_id"])  # the host's pick plays now
+    late = add(engine, c)               # Casey picks while Dana sings out of turn
+    assert late["round_no"] == 1        # Casey's slot in round 1 hasn't come up yet
+    assert singer_order(engine, eid) == ["Dana", "Blake", "Casey", "Dana"]
+
+
+def test_superset_turn_does_not_cost_later_singers_their_turn(make_event, engine):
+    eid, (a, b, c, d) = make_event(("Alex", "Blake", "Casey", "Dana"))
+    add(engine, a)
+    engine.play_next(eid)                                   # Alex, round 1
+    engine.force_superset(eid, "after")                     # Blake, Casey, Dana, Alex each pick a bonus song
+    for gst in (b, c, d, a):
+        assert add(engine, gst)["set_id"]
+    for _ in range(3):                                      # Alex's song, then Blake's and Casey's set songs
+        engine.player_ended(eid, engine.get_event(eid)["now_playing_item_id"])
+    assert singer_order(engine, eid)[0] == "Dana"           # Dana's Superset turn
+    regular = add(engine, c)                                # Casey queues her round song meanwhile
+    assert regular["round_no"] == engine.get_event(eid)["current_round"]
