@@ -43,7 +43,8 @@ class HistoryMixin:
             "id": r["id"], "event_id": r["event_id"], "event": r["event_name"], "event_date": r["event_date"],
             "at": r["played_at"] or r["added_at"], "singer": r["singer"], "singer_group": groups[name_key(r["singer"])],
             "duet": r["duet"], "duet_group": groups[name_key(r["duet"])] if r["duet"] else None,
-            "title": r["title"], "song": logic.song_name(r["title"]), "channel": r["channel"],
+            "title": r["title"], "song": logic.song_name(r["title"]), "track": logic.playlist_song(r["title"]),
+            "channel": r["channel"],
             "video_id": r["video_id"], "duration_s": r["duration_s"], "status": STATUS_LABELS[r["status"]],
             "superset": bool(r["is_superset"]), "theme": r["theme_name"], "cheers": r["cheers"],
             "round": r["round_number"],
@@ -99,3 +100,39 @@ class HistoryMixin:
         aliases = {k: g for k, g in aliases.items() if members[g] > 1}
         self.db.set_setting("singer_aliases", aliases)
         return self.singer_names()
+
+    # ------------------------------------------------------------------ playlists
+
+    def event_playlist(self, code: str) -> dict:
+        """The songs played at an event, in order, for a playlist (anyone with the join code may see it)."""
+        ev = self.event_by_code(code)
+        rows = self.db.all(
+            "SELECT q.id, q.title, q.video_id, g.display_name AS singer, d.display_name AS duet FROM queue_items q "
+            "JOIN guests g ON g.id = q.guest_id LEFT JOIN guests d ON d.id = q.duet_guest_id "
+            "WHERE q.event_id = ? AND q.status IN ('played', 'playing') ORDER BY q.played_at, q.id", (ev["id"],))
+        return {"event": {"name": ev["name"], "code": ev["join_code"], "status": ev["status"],
+                          "date": ev["started_at"] or ev["created_at"]},
+                "tracks": [{"item_id": r["id"], "track": logic.playlist_song(r["title"]), "title": r["title"],
+                            "singer": r["singer"], "duet": r["duet"], "karaoke_video_id": r["video_id"]} for r in rows]}
+
+    def playlist_items(self, item_ids: list[int], event_code: str | None = None) -> list[dict]:
+        """Sung songs by id (optionally only from one event), in the order asked for."""
+        if not item_ids:
+            return []
+        marks = ",".join("?" * len(item_ids))
+        sql = (f"SELECT q.id, q.title, q.video_id FROM queue_items q JOIN events e ON e.id = q.event_id "
+               f"WHERE q.id IN ({marks}) AND q.status IN ('played', 'playing', 'skipped')")
+        params = list(item_ids)
+        if event_code is not None:
+            sql += " AND e.join_code = ?"
+            params.append(event_code.upper())
+        found = {r["id"]: r for r in self.db.all(sql, params)}
+        return [{"item_id": i, "track": logic.playlist_song(found[i]["title"]), "karaoke_video_id": found[i]["video_id"]}
+                for i in item_ids if i in found]
+
+    def spotify_client_id(self, env_value: str = "") -> str:
+        return env_value or self.db.get_setting("spotify_client_id", "") or ""
+
+    def set_spotify_client_id(self, client_id: str) -> str:
+        self.db.set_setting("spotify_client_id", client_id.strip())
+        return client_id.strip()

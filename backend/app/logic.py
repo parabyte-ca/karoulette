@@ -198,6 +198,30 @@ def song_parts(title: str) -> list[str]:
     return list(dict.fromkeys(parts))[:3]
 
 
+# --------------------------------------------------------------------------- playlists
+
+_STYLE_OF = re.compile(r"\s*[\(\[]\s*(?:in the style of|as made famous by|made famous by|originally (?:performed|sung) by|"
+                       r"as performed by|performed by)\s+([^)\]]+)[\)\]]", re.IGNORECASE)
+_NOISE = re.compile(r"\s*[\(\[][^)\]]*(?:lyrics?|hd|4k|official|sing ?along|no vocals|with vocals|"
+                    r"guide vocals?|duet)[^)\]]*[\)\]]", re.IGNORECASE)
+
+
+def playlist_song(title: str) -> str:
+    """'Africa (In the Style of Toto) (Karaoke Version)' -> 'Toto - Africa': the original song to look for."""
+    artist = None
+    m = _STYLE_OF.search(title)
+    if m:
+        artist = m.group(1).strip()
+        title = _STYLE_OF.sub("", title)
+    name = _NOISE.sub("", song_name(title))
+    parts = [p.strip() for p in re.split(r"\s+[|]\s+", name) if p.strip()]
+    name = " - ".join(parts[:2]) if parts else name.strip()
+    name = re.sub(r"\s+", " ", name).strip(" -|")
+    if artist and artist.casefold() not in name.casefold():
+        name = f"{artist} - {name}"
+    return name or title.strip()
+
+
 # --------------------------------------------------------------------------- misc
 
 def normalise_query(q: str) -> str:

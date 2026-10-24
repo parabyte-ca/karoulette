@@ -6,6 +6,7 @@ import { useCountdown, useEventSocket } from "../lib/useEventSocket";
 import { decodeEntities, formatDuration } from "../lib/format";
 import ThemeSpinner from "../components/ThemeSpinner";
 import Recap from "../components/Recap";
+import { EventPlaylistButtons } from "../components/PlaylistButtons";
 import { SupersetChooser, SupersetLineup } from "../components/Superset";
 import { Toasts, useToasts } from "../components/Toasts";
 import { formatWait, secondsUntil, singers, sings } from "../lib/eta";
@@ -477,7 +478,14 @@ function GuestHome({ me, onLeave }) {
           </div>
 
           {ev.status === "ended" && state.recap && (
-            <section className="card"><Recap recap={state.recap} eventName={ev.name} me={me.guest.name} size="phone" /></section>
+            <>
+              <section className="card"><Recap recap={state.recap} eventName={ev.name} me={me.guest.name} size="phone" /></section>
+              <section className="card">
+                <h3>🎶 Take the night home</h3>
+                <p className="muted small">Every song from tonight as a playlist of the original recordings.</p>
+                <EventPlaylistButtons code={ev.join_code} name={ev.name} />
+              </section>
+            </>
           )}
 
           {ev.status !== "ended" && <SearchPanel canAdd={!atCap && !pastLastCall} onAdd={addSong} push={push}
@@ -596,6 +604,7 @@ function GuestHome({ me, onLeave }) {
           <p className="rejoin-note small">Your rejoin code: <strong className="rejoin-code">{me.guest.rejoin_code}</strong>
             <br /><span className="muted">Switching phones? Use it with the event code to keep your place and songs.</span></p>
         )}
+        {ev.status !== "ended" && <a className="btn btn-link" href={`/playlist/${ev.join_code}`}>🎶 Tonight's playlist so far</a>}
         {canInstall && <button className="btn" onClick={install}>📲 Install Karoulette</button>}
         {iosHint && <p className="muted small">Tip: tap Share, then “Add to Home Screen” to keep Karoulette one tap away.</p>}
         <button className="btn btn-link" onClick={leave}>Leave event</button>

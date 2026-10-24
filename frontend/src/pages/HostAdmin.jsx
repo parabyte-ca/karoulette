@@ -199,6 +199,7 @@ function EventSettings({ eventId, push, onChanged }) {
           <button className="btn btn-primary">Save settings</button>
           <Link className="btn" to={`/host/event/${eventId}`}>Open TV screen</Link>
           <Link className="btn" to={`/host/remote/${eventId}`}>📱 Phone remote</Link>
+          <a className="btn" href={`/playlist/${state.event.join_code}`} target="_blank" rel="noreferrer">🎶 Playlist</a>
           <a className="btn" href={`/api/host/events/${eventId}/history.csv`}>Export song history (CSV)</a>
           <span className="spacer" />
           <button type="button" className="btn btn-danger" onClick={del}>Delete event</button>

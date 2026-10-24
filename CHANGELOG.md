@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.11.0] - 2026-10-24
+### Added
+- **Playlists from events**: turn the night's songs into a playlist of the **original recordings** (not the karaoke versions).
+  - **YouTube**: one tap makes a YouTube playlist link; longer nights are split into parts of 50 songs. Nothing to set up.
+  - **Spotify**: saves a private playlist to the listener's own Spotify (they sign in with Spotify; Karoulette never sees their login). The host connects a free Spotify developer app once in Host admin → Song history → Playlists.
+  - **Where**: each event's playlist page (`/playlist/<code>`), a QR code on the TV's end-of-night recap, a "Take the night home" card on guests' phones after the event (and a "Tonight's playlist so far" link during it), a **🎶 Playlist** button for each event in Host admin, and the Song history (admin and `/history`), which makes a playlist of whatever the filters show.
+  - Originals are found with the free backup search first, then the YouTube API only while at least 3,000 units are left for guests' searches. Each song is looked up once and remembered; if no original turns up, the karaoke video stands in.
+- `SPOTIFY_CLIENT_ID` environment variable (optional), as an alternative to setting the Spotify app in Host admin.
+
 ## [0.10.0] - 2026-10-24
 ### Added
 - **Song history** (Host admin → Song history): every song sung or skipped at every event, newest first, with who sang it (and any duet partner), the date and time, and the event.

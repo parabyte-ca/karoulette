@@ -427,3 +427,66 @@ test("song history: every event's songs, merged singer names, CSV export and the
   await expect(guest.getByText("The host hasn't shared the song history.")).toBeVisible();
   await api.put("/api/host/history/public", { data: { on: true } });
 });
+
+test("playlists: an event's page, the TV recap QR, the phone recap and saving to Spotify", async ({ browser }) => {
+  const { ctx, ev, api } = await hostWithEvent(browser, "Playlist Night", { ready_seconds: 0 });
+  await api.put("/api/host/playlists/spotify", { data: { client_id: "e2eclientid" } });
+  const tv = await openTv(ctx, ev);
+  const phone = await joinPhone(browser, ev, "Rae");
+  await queue(phone, "Africa (In the Style of Toto) (Karaoke Version)");
+  await queue(phone, "Queen - Bohemian Rhapsody (Karaoke)");
+  await api.post(`/api/host/events/${ev.id}/actions/start`);
+  await finishSong(api, ev);
+  await finishSong(api, ev);
+  await api.post(`/api/host/events/${ev.id}/actions/end`);
+  await expect(tv.locator(".recap-playlist img")).toHaveAttribute("src", new RegExp(`page=playlist`));
+  await expect(phone.getByRole("button", { name: /YouTube playlist \(2\)/ })).toBeVisible();
+
+  // The playlist page: no search in tests, so the karaoke videos stand in for the originals.
+  const page = await phone.context().newPage();
+  await page.goto(`/playlist/${ev.join_code}`);
+  await expect(page.locator(".playlist-tracks li")).toHaveCount(2);
+  await expect(page.locator(".playlist-tracks")).toContainText("Toto - Africa");
+  await page.getByRole("button", { name: /YouTube playlist/ }).click();
+  const link = page.getByRole("link", { name: /Open on YouTube/ });
+  await expect(link).toHaveAttribute("href", /^https:\/\/www\.youtube\.com\/watch_videos\?video_ids=e2e\d{8},e2e\d{8}$/);
+
+  // Spotify, with Spotify itself stood in for.
+  const origin = new URL(page.url()).origin;
+  const added = [];
+  const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, content-type",
+                 "Access-Control-Allow-Methods": "GET, POST, OPTIONS" };
+  await page.context().route("https://accounts.spotify.com/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/authorize") {
+      expect(url.searchParams.get("redirect_uri")).toBe(`${origin}/spotify`);
+      return route.fulfill({ contentType: "text/html", body: `<script>location.replace(${JSON.stringify(
+        `${origin}/spotify?code=c1&state=${url.searchParams.get("state")}`)})</script>` });
+    }
+    if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
+    expect(route.request().postData()).toContain("code_verifier=");
+    return route.fulfill({ headers: cors, json: { access_token: "tok" } });
+  });
+  await page.context().route("https://api.spotify.com/**", async (route) => {
+    const req = route.request();
+    if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
+    const path = new URL(req.url()).pathname;
+    if (path === "/v1/me") return route.fulfill({ headers: cors, json: { id: "rae" } });
+    if (path === "/v1/search") {
+      const q = new URL(req.url()).searchParams.get("q");
+      return route.fulfill({ headers: cors, json: { tracks: { items: [{ uri: `spotify:track:${q.length}` }] } } });
+    }
+    if (path === "/v1/users/rae/playlists") {
+      return route.fulfill({ headers: cors, json: { id: "pl1", external_urls: { spotify: "https://open.spotify.com/playlist/pl1" } } });
+    }
+    if (path === "/v1/playlists/pl1/tracks") { added.push(...req.postDataJSON().uris); return route.fulfill({ headers: cors, json: {} }); }
+    return route.fulfill({ status: 404, headers: cors, json: {} });
+  });
+  await page.getByRole("button", { name: "Spotify playlist" }).click();
+  await expect(page.getByRole("link", { name: /Open in Spotify/ })).toHaveAttribute("href", "https://open.spotify.com/playlist/pl1");
+  await expect(page.getByText(/is in your Spotify with 2 songs/)).toBeVisible();
+  expect(added).toHaveLength(2);
+  await page.getByRole("link", { name: "← Back" }).click();
+  await expect(page).toHaveURL(new RegExp(`/playlist/${ev.join_code}$`));
+  await api.put("/api/host/playlists/spotify", { data: { client_id: "" } });
+});

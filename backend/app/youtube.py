@@ -27,6 +27,9 @@ VIDEOS_COST = 1
 SEARCH_TTL = 24 * 3600
 VIDEO_TTL = 7 * 24 * 3600
 MAX_RESULTS = 15
+ORIGINAL_RESERVE = 3000  # quota units kept back for guests' searches when finding originals for playlists
+NOT_ORIGINAL = re.compile(r"karaoke|instrumental|backing track|cover|sing ?along|nightcore|8d audio|slowed",
+                          re.IGNORECASE)
 PACIFIC = ZoneInfo("America/Los_Angeles")  # YouTube quotas reset at midnight Pacific
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
@@ -251,6 +254,36 @@ class YouTubeService:
                     return None
         # Could not verify: allow it; the host player's error handler is the safety net.
         return {"video_id": video_id, "embeddable": True, "duration_s": None, "verified": False}
+
+    async def find_original(self, song: str) -> str | None:
+        """The original recording of a song (for playlists), cached for good. yt-dlp first since it's free;
+        the API only while plenty of quota is left for guests' searches. None if it can't be found."""
+        key = song.casefold()
+        cached = self.db.one("SELECT video_id FROM song_originals WHERE song_key = ?", (key,))
+        if cached:
+            return cached["video_id"]
+        query = f"{song} official audio"
+        results, source = None, None
+        if self.enable_ytdlp:
+            try:
+                results, source = await self._ytdlp_search(query), "ytdlp"
+            except Exception as exc:  # yt-dlp raises many types
+                log.warning("yt-dlp original lookup failed: %s", exc)
+        if results is None and self._can_spend(SEARCH_COST + ORIGINAL_RESERVE):
+            try:
+                data = await self._api_get("search", {"part": "snippet", "q": query, "type": "video",
+                                                      "videoCategoryId": "10", "maxResults": 5}, SEARCH_COST)
+                results = [{"video_id": i["id"]["videoId"], "title": i.get("snippet", {}).get("title", "")}
+                           for i in data.get("items", []) if i.get("id", {}).get("videoId")]
+                source = "api"
+            except (SearchUnavailable, httpx.HTTPError) as exc:
+                log.warning("Original lookup failed: %s", exc)
+        if results is None:
+            return None  # nothing to ask right now: try again next time
+        pick = next((r["video_id"] for r in results if not NOT_ORIGINAL.search(r.get("title", ""))), None)
+        self.db.execute("INSERT OR REPLACE INTO song_originals(song_key, video_id, source, found_at) VALUES (?, ?, ?, ?)",
+                        (key, pick, source, time.time()))
+        return pick
 
     def purge_cache(self) -> None:
         self.db.execute("DELETE FROM search_cache WHERE fetched_at < ?", (time.time() - SEARCH_TTL,))
