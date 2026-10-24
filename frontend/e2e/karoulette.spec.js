@@ -277,7 +277,9 @@ test("admin, event list and remote fit a phone screen", async ({ browser }) => {
 });
 
 test("crowd meter, last call and the recap's crowd favourite", async ({ browser }) => {
-  const soon = new Date(Date.now() + 9 * 60 * 1000); // room for about two 4-minute songs
+  // Closing in 9-10 minutes (HH:MM drops the seconds): room for Alex's 4-minute song and one more, never
+  // less than 8 minutes away (which would already be last call) and never 12 (room for a third).
+  const soon = new Date(Date.now() + 10 * 60 * 1000);
   const lastCall = `${String(soon.getHours()).padStart(2, "0")}:${String(soon.getMinutes()).padStart(2, "0")}`;
   const { ctx, ev, api } = await hostWithEvent(browser, "Cheer Night", { ready_seconds: 0, last_call: lastCall });
   const alex = await joinPhone(browser, ev, "Alex");
