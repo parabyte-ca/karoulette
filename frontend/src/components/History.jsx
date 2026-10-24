@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { decodeEntities } from "../lib/format";
+import PlaylistButtons from "./PlaylistButtons";
 
 const day = (t) => new Date(t * 1000).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" });
 const time = (t) => new Date(t * 1000).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" });
@@ -101,6 +102,8 @@ export default function HistoryDashboard({ songs }) {
   }, [songs, q, eventId, singer, from, to, status]);
 
   const filtered = q || eventId || singer || from || to || status;
+  const playlistName = ["Karoulette", singer, eventId && events.find((e) => String(e.id) === eventId)?.name,
+    from || to ? [from, to].filter(Boolean).join(" to ") : null, q && `“${q}”`].filter(Boolean).join(" · ");
   const clear = () => { setQ(""); setEventId(""); setSinger(""); setFrom(""); setTo(""); setStatus(""); setShown(PAGE); };
   const hours = rows.reduce((t, r) => t + (r.status === "skipped" ? 0 : r.duration_s || 0), 0) / 3600;
   const nights = new Set(rows.map((r) => r.event_id)).size;
@@ -127,7 +130,7 @@ export default function HistoryDashboard({ songs }) {
         <label className="date-field"><span>To</span>
           <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} /></label>
         <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Played or skipped">
-          <option value="">Played and skipped</option>
+          <option value="">Played + skipped</option>
           <option value="played">Played</option>
           <option value="skipped">Skipped</option>
         </select>
@@ -156,6 +159,8 @@ export default function HistoryDashboard({ songs }) {
             ⬇ Export {filtered ? "these" : "all"} as CSV
           </button>
         </div>
+        <PlaylistButtons compact name={playlistName} description="Songs from Karoulette nights 🎤"
+                         items={rows.filter((r) => r.status !== "skipped").map((r) => ({ item_id: r.id, track: r.track }))} />
         {rows.length === 0 ? (
           <p className="muted">{songs.length ? "No songs match these filters." : "Songs show up here once they've been sung."}</p>
         ) : (

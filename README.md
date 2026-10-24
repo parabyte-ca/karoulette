@@ -106,6 +106,7 @@ All settings live in `.env` (see `.env.example`).
 | `HOST_PIN` | _(required)_ | Host PIN or password, 4+ characters. When set, it always wins over a PIN changed in admin |
 | `YOUTUBE_API_KEY` | _(blank)_ | YouTube Data API v3 key. Blank = yt-dlp fallback search |
 | `YOUTUBE_DAILY_QUOTA` | `10000` | Daily quota used for the remaining-quota estimate |
+| `SPOTIFY_CLIENT_ID` | _(blank)_ | Optional: the Client ID of your Spotify app, for Spotify playlists (or set it in Host admin → Song history → Playlists) |
 | `PUBLIC_BASE_URL` | _(blank)_ | Site address used in the QR code and join link previews, e.g. `https://karaoke.example.ca` (just the root; a pasted `/join` or `/host` is stripped). Blank = the address the TV used |
 | `SECRET_KEY` | _(generated)_ | Signs host session cookies |
 | `ENABLE_YTDLP` | `true` | Allow the yt-dlp metadata fallback |
@@ -137,6 +138,7 @@ All settings live in `.env` (see `.env.example`).
 8. When you're done, **End event**: the TV and phones show the night's recap. Export the song history from Host admin → Events → _Export song history (CSV)_.
 
 ### Host admin (`/host/admin`)
+- **Playlists** (Song history → Playlists): YouTube playlists of the original songs work straight away. For Spotify, create a free app at developer.spotify.com, add the redirect URI shown there (your HTTPS address + `/spotify`), and paste its Client ID. In Spotify's development mode, only accounts added under User Management can sign in.
 - **Song history**: every song from every event, with filters, stats (top singers, most-sung songs, songs per event), CSV export of what's showing, and merging the names one singer has used. Guests can see a read-only copy at `/history` unless you switch sharing off.
 - **Events**: settings, singer order (move up/down, **Bouche!**, rejoin codes), round themes, phone remote, CSV export, delete.
 - **Themes**: add, edit, weight, enable/disable, delete.

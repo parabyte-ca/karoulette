@@ -314,7 +314,15 @@ export default function HostScreen() {
               </div>
             )}
             {idle && ev.status === "ended" && state.recap && (
-              <div className="idle-overlay recap-overlay"><Recap recap={state.recap} eventName={ev.name} /></div>
+              <div className="idle-overlay recap-overlay">
+                <Recap recap={state.recap} eventName={ev.name} />
+                {state.recap.songs > 0 && (
+                  <div className="recap-playlist">
+                    <img src={`/api/public/qr.svg?code=${ev.join_code}&page=playlist`} alt="QR code for tonight's playlist" />
+                    <div><b>Take the night home 🎶</b><span>Scan for tonight's songs as a YouTube or Spotify playlist</span></div>
+                  </div>
+                )}
+              </div>
             )}
             {idle && paused && (
               <div className="idle-overlay smoke-break" aria-live="assertive">

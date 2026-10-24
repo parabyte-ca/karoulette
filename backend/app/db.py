@@ -172,6 +172,13 @@ CREATE TABLE IF NOT EXISTS video_cache (
     fetched_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS song_originals (            -- the original recording of a sung song, for playlists
+    song_key TEXT PRIMARY KEY,                     -- playlist_song(), case-folded
+    video_id TEXT,                                 -- NULL: looked for and not found
+    source TEXT NOT NULL,                          -- ytdlp | api
+    found_at REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS quota_ledger (
     day TEXT PRIMARY KEY,
     units_used INTEGER NOT NULL DEFAULT 0,

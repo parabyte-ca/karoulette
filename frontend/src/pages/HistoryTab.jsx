@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import HistoryDashboard from "../components/History";
+import { resetPlaylistConfig } from "../lib/playlists";
 
 /** Host admin: merge the names one singer has used across events. */
 function SingerNames({ names, onChange, push }) {
@@ -61,6 +62,46 @@ function SingerNames({ names, onChange, push }) {
   );
 }
 
+/** Host admin: connect a Spotify app so people can save playlists to their own Spotify. */
+function SpotifySetup({ spotify, push, onSaved }) {
+  const [id, setId] = useState(spotify.client_id);
+  const [busy, setBusy] = useState(false);
+  const redirect = spotify.redirect_uri || `${window.location.origin}/spotify`;
+  const save = async (value) => {
+    setBusy(true);
+    try {
+      const r = await api("/api/host/playlists/spotify", { method: "PUT", body: { client_id: value } });
+      resetPlaylistConfig();
+      onSaved(r.spotify_client_id);
+      push(r.spotify_client_id ? "Spotify playlists are on." : "Spotify playlists are off.", "success");
+    } catch (e) { push(e.message, "error"); } finally { setBusy(false); }
+  };
+  return (
+    <details className="names-panel">
+      <summary>Playlists · Spotify {spotify.client_id ? "connected ✓" : "not set up (YouTube playlists work already)"}</summary>
+      <p className="muted small">YouTube playlists need nothing set up. For Spotify, connect a free Spotify developer app
+        once; then each person signs in with their own Spotify and the playlist is saved to their account.</p>
+      <ol className="small setup-steps">
+        <li>Go to <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer">developer.spotify.com/dashboard</a>
+          , sign in and choose <strong>Create app</strong> (any name, e.g. Karoulette).</li>
+        <li>Add this <strong>Redirect URI</strong> exactly: <code>{redirect}</code>
+          <button type="button" className="btn btn-link small" onClick={() => navigator.clipboard?.writeText(redirect)}>Copy</button>
+          <br /><span className="muted">It must be the HTTPS address guests use. Add one for each address if you have several.</span></li>
+        <li>Tick <strong>Web API</strong>, save, then copy the app's <strong>Client ID</strong> here.</li>
+        <li>While the app is in Spotify's development mode, only the Spotify accounts you add under
+          <strong> User Management</strong> can sign in. Ask Spotify for an extension to open it to everyone.</li>
+      </ol>
+      {spotify.from_env ? <p className="small">Set by <code>SPOTIFY_CLIENT_ID</code> in the container settings.</p> : (
+        <div className="row wrap">
+          <input value={id} onChange={(e) => setId(e.target.value.trim())} placeholder="Spotify Client ID" aria-label="Spotify Client ID" maxLength={64} />
+          <button className="btn btn-primary" disabled={busy || id === spotify.client_id} onClick={() => save(id)}>Save</button>
+          {spotify.client_id && <button className="btn btn-danger" disabled={busy} onClick={() => { setId(""); save(""); }}>Turn off</button>}
+        </div>
+      )}
+    </details>
+  );
+}
+
 /** Song history across every event, with the public page switch and name merging. */
 export default function HistoryTab({ push }) {
   const [data, setData] = useState(null);
@@ -85,6 +126,8 @@ export default function HistoryTab({ push }) {
           link can see singers' names and songs)</span>
       </label>
       <SingerNames names={data.names} push={push} onChange={(names) => { setData({ ...data, names }); load(); }} />
+      <SpotifySetup spotify={data.spotify} push={push}
+                    onSaved={(clientId) => setData({ ...data, spotify: { ...data.spotify, client_id: clientId } })} />
       <HistoryDashboard songs={data.songs} />
     </section>
   );

@@ -85,6 +85,15 @@ class SwitchIn(BaseModel):
     on: bool
 
 
+class OriginalsIn(BaseModel):
+    item_ids: list[int] = Field(min_length=1, max_length=10)
+    code: str | None = Field(default=None, max_length=10)
+
+
+class SpotifyIn(BaseModel):
+    client_id: str = Field(max_length=64, pattern=r"^[A-Za-z0-9]*$")
+
+
 class PinIn(BaseModel):
     pin: str = Field(min_length=1, max_length=64)
 
@@ -158,7 +167,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     limits = {
         "search_guest": RateLimiter(10, 60), "search_ip": RateLimiter(60, 60),
         "join": RateLimiter(15, 60), "login": RateLimiter(8, 60), "queue": RateLimiter(10, 60),
-        "react": RateLimiter(20, 10),
+        "react": RateLimiter(20, 10), "originals": RateLimiter(60, 60),
     }
 
     pending_state: dict[int, asyncio.Task] = {}
@@ -304,10 +313,10 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         return Response(out.getvalue(), media_type="image/svg+xml")
 
     @app.get("/api/public/qr.svg")
-    async def qr(request: Request, code: str):
-        if not code.isalnum() or len(code) > 10:
+    async def qr(request: Request, code: str, page: str = "join"):
+        if not code.isalnum() or len(code) > 10 or page not in ("join", "playlist"):
             raise HTTPException(400, "Invalid code")
-        return qr_svg(f"{base_url(request)}/join/{code.upper()}")
+        return qr_svg(f"{base_url(request)}/{page}/{code.upper()}")
 
     # ------------------------------------------------------------------ guest
 
@@ -573,7 +582,10 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
 
     @app.get("/api/host/history", dependencies=host)
     async def host_history():
-        return {**engine.history(), "names": engine.singer_names()}
+        return {**engine.history(), "names": engine.singer_names(),
+                "spotify": {"client_id": engine.spotify_client_id(settings.spotify_client_id),
+                            "from_env": bool(settings.spotify_client_id),
+                            "redirect_uri": f"{settings.public_base_url}/spotify" if settings.public_base_url else None}}
 
     @app.get("/api/public/history")
     async def public_history():
@@ -592,6 +604,44 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     @app.post("/api/host/history/unmerge", dependencies=host)
     async def unmerge_singer(body: SingerNameIn):
         return await run(engine.unmerge_singer, body.name)
+
+    # ------------------------------------------------------------------ playlists
+
+    @app.get("/api/public/events/{code}/playlist")
+    async def event_playlist(code: str):
+        try:
+            return engine.event_playlist(code)
+        except EngineError as exc:
+            raise HTTPException(exc.status, exc.message) from exc
+
+    @app.get("/api/public/playlist-config")
+    async def playlist_config():
+        return {"spotify_client_id": engine.spotify_client_id(settings.spotify_client_id)}
+
+    @app.put("/api/host/playlists/spotify", dependencies=host)
+    async def set_spotify(body: SpotifyIn):
+        if settings.spotify_client_id:
+            raise HTTPException(409, "The Spotify client ID is set by SPOTIFY_CLIENT_ID in the container settings.")
+        return {"spotify_client_id": await run(engine.set_spotify_client_id, body.client_id)}
+
+    @app.post("/api/public/playlist/originals")
+    async def playlist_originals(body: OriginalsIn, request: Request):
+        """The original recording of each sung song, for a YouTube playlist: from one event (with its join
+        code), from the song history (when it's shared), or anything for the host. Falls back to the
+        karaoke video when the original can't be found."""
+        is_host = auth.check_session(settings.secret_key, request.cookies.get(auth.COOKIE_NAME))
+        if not body.code and not is_host and not engine.history_public():
+            raise HTTPException(403, "The host hasn't shared the song history.")
+        items = engine.playlist_items(body.item_ids, None if is_host and not body.code else body.code)
+        out = []
+        for item in items:
+            known = db.one("SELECT video_id FROM song_originals WHERE song_key = ?", (item["track"].casefold(),))
+            if known is None and not is_host:
+                limit("originals", client_ip(request))
+            video_id = await yt.find_original(item["track"])
+            out.append({"item_id": item["item_id"], "track": item["track"],
+                        "video_id": video_id or item["karaoke_video_id"], "original": bool(video_id)})
+        return out
 
     # ------------------------------------------------------------------ host: themes & quota
 
@@ -782,7 +832,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
 
     # ------------------------------------------------------------------ SPA
 
-    def spa_page(request: Request, code: str | None = None) -> Response:
+    def spa_page(request: Request, code: str | None = None, playlist: bool = False) -> Response:
         """The app's index.html, with link-preview tags so a shared join link shows the event and banner."""
         index = settings.static_dir / "index.html"
         if not index.exists():
@@ -791,7 +841,10 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         if code:
             try:
                 ev = engine.event_by_code(code)
-                if ev["status"] != "ended":
+                if playlist:
+                    title = f"{ev['name']}: the playlist · Karoulette"
+                    description = "Every song from the night, as a YouTube or Spotify playlist. 🎶"
+                elif ev["status"] != "ended":
                     title = f"Join {ev['name']} on Karoulette"
                     description = f"Tap to join with code {ev['join_code']}, then queue your songs from your phone. 🎤"
             except EngineError:
@@ -817,6 +870,10 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     @app.get("/join")
     async def join_page(request: Request):
         return spa_page(request)
+
+    @app.get("/playlist/{code}")
+    async def playlist_page(request: Request, code: str):
+        return spa_page(request, code, playlist=True)
 
     @app.get("/join/{code}")
     async def join_code_page(request: Request, code: str):
