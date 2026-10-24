@@ -371,9 +371,10 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         limit("search_ip", client_ip(request))
         ev = engine.get_event(guest["event_id"])
         try:
-            return await yt.search(q, ev["config"]["safe_search"])
+            found = await yt.search(q, ev["config"]["safe_search"])
         except SearchUnavailable as exc:
             raise HTTPException(503, str(exc)) from exc
+        return {**found, "results": engine.mark_duplicates(ev["id"], found["results"])}
 
     @app.post("/api/guest/queue")
     async def guest_queue(body: QueueIn, guest: dict = Depends(current_guest)):

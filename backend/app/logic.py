@@ -102,8 +102,15 @@ def play_order(items: Iterable[dict], positions: dict[int, int] | None = None, c
     return sorted((i for i in items if i["status"] == "queued"), key=lambda i: sort_key(i, positions, current_round))
 
 
-def is_duplicate(items: Iterable[dict], video_id: str) -> bool:
-    return any(i["video_id"] == video_id and i["status"] in ("queued", "playing", "played") for i in items)
+def find_duplicate(items: Iterable[dict], video_id: str, title: str = "") -> dict | None:
+    """A song already played, playing or waiting tonight that is the same video, or the same song from
+    another karaoke channel. Skipped and failed songs don't count, so a bad video can be picked again."""
+    key = song_key(title) if title else ""
+    for i in items:
+        if i["status"] in ("queued", "playing", "played") and (
+                i["video_id"] == video_id or (key and song_key(i["title"]) == key)):
+            return i
+    return None
 
 
 # --------------------------------------------------------------------------- themes
@@ -220,6 +227,28 @@ def playlist_song(title: str) -> str:
     if artist and artist.casefold() not in name.casefold():
         name = f"{artist} - {name}"
     return name or title.strip()
+
+
+_FEAT = re.compile(r"\s*[\(\[]?\b(?:feat\.?|ft\.?|featuring)\s+[^)\]\-|]*[\)\]]?", re.IGNORECASE)
+_KARAOKE_WORDS = re.compile(r"\b(?:karaoke|instrumental|backing track|version|lyrics?|no vocals|with vocals|hd|4k|"
+                            r"official|video|audio|duet|key of [a-g][#b]?(?:m|minor|major)?)\b", re.IGNORECASE)
+
+
+def _key_part(part: str) -> str:
+    part = unicodedata.normalize("NFKD", part).encode("ascii", "ignore").decode()
+    part = re.sub(r"[^a-z0-9 ]+", " ", part.casefold())
+    # "The Killers" = "Killers"; "Lady Gaga & Bradley Cooper" = "Lady Gaga, Bradley Cooper" = "... and ...".
+    part = re.sub(r"\b(?:the|and)\b", " ", part)
+    return " ".join(part.split())
+
+
+def song_key(title: str) -> str:
+    """Who and what, whatever the channel: 'Huey Lewis & The News - Stuck With You (Karaoke)' and
+    'Stuck with you | Huey Lewis and the News | Reekies Karaoke' both give 'huey lewis news|stuck with you'."""
+    name = _FEAT.sub(" ", playlist_song(title))
+    parts = [_key_part(_KARAOKE_WORDS.sub(" ", p)) for p in re.split(r"\s+[-–|:]\s+|\s*\|\s*", name)]
+    parts = [p for p in parts if p and not p.endswith("karaoke")]
+    return "|".join(sorted(dict.fromkeys(parts[:2]))) if parts else ""
 
 
 # --------------------------------------------------------------------------- misc

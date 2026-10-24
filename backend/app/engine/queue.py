@@ -25,8 +25,12 @@ class QueueMixin:
         ev = self.get_event(guest["event_id"])
         if ev["status"] == "ended":
             raise EngineError("This event has ended", 410)
-        if ev["config"]["prevent_duplicates"] and logic.is_duplicate(self._items(ev["id"]), video["video_id"]):
-            raise EngineError("That song has already been sung or queued tonight. Pick another!", 409)
+        if ev["config"]["prevent_duplicates"]:
+            dup = logic.find_duplicate(self._items(ev["id"]), video["video_id"], video.get("title") or "")
+            if dup:
+                who = "you" if dup["guest_id"] == guest_id else self._guest(dup["guest_id"])["display_name"]
+                when = "is already in the queue" if dup["status"] == "queued" else "has already been sung tonight"
+                raise EngineError(f"“{logic.song_name(dup['title'])}” {when} (picked by {who}). Pick another!", 409)
         max_d = int(ev["config"]["max_duration_s"])
         if max_d and video.get("duration_s") and video["duration_s"] > max_d:
             raise EngineError(f"That video is longer than the {max_d // 60}-minute limit")
@@ -194,3 +198,12 @@ class QueueMixin:
         """A song can be flagged while its Superset set is running."""
         sset = self._active_set(ev["id"])
         return bool(sset and item["set_id"] == sset["id"])
+
+    def mark_duplicates(self, event_id: int, results: list[dict]) -> list[dict]:
+        """Flag search results that are a song already sung or waiting tonight (any channel)."""
+        ev = self.get_event(event_id)
+        items = [i for i in self._items(event_id) if i["status"] in ("queued", "playing", "played")]
+        videos = {i["video_id"] for i in items}
+        keys = {logic.song_key(i["title"]) for i in items} - {""}
+        return [{**r, "already": r["video_id"] in videos or logic.song_key(r.get("title") or "") in keys,
+                 "blocked": bool(ev["config"]["prevent_duplicates"])} for r in results]

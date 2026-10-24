@@ -3,6 +3,7 @@ import random
 
 import pytest
 
+from app import logic
 from app.db import Database
 from app.engine import Engine, EngineError
 from tests.conftest import add, play_all, singer_order, video
@@ -121,3 +122,57 @@ def test_old_database_gets_new_columns(tmp_path):
     db = Database(path)
     for table, column, _ in ADDED_COLUMNS:
         assert column in {r["name"] for r in db.all(f"PRAGMA table_info({table})")}
+
+
+# ---- the same song from another karaoke channel is a duplicate too (0.11.2)
+
+def song(vid, title):
+    return {"video_id": vid, "title": title, "channel": "Some Karaoke", "duration_s": 200, "thumbnail": ""}
+
+
+def test_song_key_matches_across_channels():
+    same = [
+        ("Huey Lewis and The News - Stuck With You (Karaoke Version)", "Huey Lewis and the News | Stuck with You | Karaoke"),
+        ("Huey Lewis & The News - Stuck With You", "Stuck With You - Huey Lewis and the News (Karaoke)"),
+        ("Africa (In the Style of Toto) (Karaoke Version)", "Toto - Africa (Karaoke)"),
+        ("Beyoncé - Halo (Karaoke)", "Beyonce - Halo [Karaoke Version]"),
+        ("Shallow (Duet) - Lady Gaga & Bradley Cooper | Karaoke", "Lady Gaga, Bradley Cooper - Shallow (Karaoke)"),
+        ("Calvin Harris ft. Rihanna - This Is What You Came For", "Calvin Harris - This Is What You Came For (Karaoke)"),
+        ("Bon Jovi - Livin' On A Prayer (Karaoke Version)", "Bon Jovi | Livin on a Prayer | Sing King Karaoke"),
+    ]
+    for a, b in same:
+        assert logic.song_key(a) == logic.song_key(b), (a, b)
+    different = [("Adele - Hello (Karaoke)", "Lionel Richie - Hello (Karaoke)"),
+                 ("U2 - With Or Without You (Karaoke)", "U2 - Without You (Karaoke)")]
+    for a, b in different:
+        assert logic.song_key(a) != logic.song_key(b), (a, b)
+
+
+def test_same_song_other_channel_is_refused_even_in_a_superset(engine, make_event):
+    eid, (a, b, c) = make_event(names=("Alex", "Blake", "Casey"))
+    engine.queue_song(a["id"], song("reekies0001", "Huey Lewis and the News | Stuck with You | Reekies Karaoke"))
+    with pytest.raises(EngineError) as exc:
+        engine.queue_song(b["id"], song("partytyme01", "Huey Lewis and The News - Stuck With You (Karaoke)"))
+    assert "already in the queue (picked by Alex)" in exc.value.message
+    engine.play_next(eid)
+    engine.player_ended(eid, engine.get_event(eid)["now_playing_item_id"])
+    engine.force_superset(eid, "after")
+    with pytest.raises(EngineError) as exc:                  # a Superset pick is checked too
+        engine.queue_song(c["id"], song("partytyme01", "Stuck With You - Huey Lewis & The News"))
+    assert "has already been sung tonight" in exc.value.message
+
+
+def test_a_skipped_or_failed_song_can_be_picked_again(engine, make_event):
+    eid, (a, b) = make_event(names=("Alex", "Blake"))
+    engine.queue_song(a["id"], song("badvideo001", "Toto - Africa (Karaoke)"))
+    engine.play_next(eid)
+    engine.skip_song(eid)                                    # a bad video: skipped
+    engine.queue_song(a["id"], song("goodvideo01", "Africa (In the Style of Toto) (Karaoke Version)"))
+
+
+def test_search_results_flag_songs_already_sung(engine, make_event):
+    eid, (a,) = make_event(names=("Alex",))
+    engine.queue_song(a["id"], song("reekies0001", "Huey Lewis and the News | Stuck with You | Karaoke"))
+    marked = engine.mark_duplicates(eid, [song("partytyme01", "Huey Lewis & The News - Stuck With You (Karaoke)"),
+                                          song("other000001", "Huey Lewis & The News - The Power Of Love (Karaoke)")])
+    assert [(r["already"], r["blocked"]) for r in marked] == [(True, True), (False, True)]
