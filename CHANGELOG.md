@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.11.1] - 2026-10-24
+### Fixed
+- Song history: long Superset themes squeezed into a stretched pill. Superset songs now get a short "★ Superset" badge with the theme as a note underneath (two lines at most; the full theme shows on hover).
+
 ## [0.11.0] - 2026-10-24
 ### Added
 - **Playlists from events**: turn the night's songs into a playlist of the **original recordings** (not the karaoke versions).

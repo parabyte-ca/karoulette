@@ -186,9 +186,10 @@ export default function HistoryDashboard({ songs }) {
                 <span role="cell" className="h-details">
                   {r.status === "skipped" && <span className="tag tag-skip">Skipped</span>}
                   {r.status === "singing" && <span className="tag">Singing now</span>}
-                  {r.superset && <span className="tag tag-gold">★ Superset{r.theme ? `: ${r.theme}` : ""}</span>}
-                  {!r.superset && r.theme && <span className="tag">{r.theme}</span>}
+                  {r.superset && <span className="tag tag-gold">★ Superset</span>}
                   {r.cheers > 0 && <span className="tag">🔥 {r.cheers}</span>}
+                  {r.theme && <span className="h-theme" title={decodeEntities(r.theme)}>
+                    {r.superset ? "" : "Theme: "}{decodeEntities(r.theme)}</span>}
                 </span>
               </div>
             ))}
