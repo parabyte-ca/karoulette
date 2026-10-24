@@ -72,6 +72,19 @@ class BannerAllIn(BaseModel):
     on: bool
 
 
+class MergeIn(BaseModel):
+    names: list[str] = Field(min_length=1, max_length=50)
+    into: str = Field(min_length=1, max_length=40)
+
+
+class SingerNameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+
+
+class SwitchIn(BaseModel):
+    on: bool
+
+
 class PinIn(BaseModel):
     pin: str = Field(min_length=1, max_length=64)
 
@@ -555,6 +568,30 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         safe = "".join(c if c.isalnum() else "-" for c in ev["name"]).strip("-")[:40] or "event"
         return PlainTextResponse(engine.history_csv(event_id), media_type="text/csv",
                                  headers={"Content-Disposition": f'attachment; filename="karoulette-{safe}.csv"'})
+
+    # ------------------------------------------------------------------ song history (every event)
+
+    @app.get("/api/host/history", dependencies=host)
+    async def host_history():
+        return {**engine.history(), "names": engine.singer_names()}
+
+    @app.get("/api/public/history")
+    async def public_history():
+        if not engine.history_public():
+            raise HTTPException(404, "The host hasn't shared the song history.")
+        return engine.history()
+
+    @app.put("/api/host/history/public", dependencies=host)
+    async def history_public(body: SwitchIn):
+        return {"public": await run(engine.set_history_public, body.on)}
+
+    @app.post("/api/host/history/merge", dependencies=host)
+    async def merge_singers(body: MergeIn):
+        return await run(engine.merge_singers, body.names, body.into)
+
+    @app.post("/api/host/history/unmerge", dependencies=host)
+    async def unmerge_singer(body: SingerNameIn):
+        return await run(engine.unmerge_singer, body.name)
 
     # ------------------------------------------------------------------ host: themes & quota
 

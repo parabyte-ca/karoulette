@@ -137,6 +137,7 @@ All settings live in `.env` (see `.env.example`).
 8. When you're done, **End event**: the TV and phones show the night's recap. Export the song history from Host admin → Events → _Export song history (CSV)_.
 
 ### Host admin (`/host/admin`)
+- **Song history**: every song from every event, with filters, stats (top singers, most-sung songs, songs per event), CSV export of what's showing, and merging the names one singer has used. Guests can see a read-only copy at `/history` unless you switch sharing off.
 - **Events**: settings, singer order (move up/down, **Bouche!**, rejoin codes), round themes, phone remote, CSV export, delete.
 - **Themes**: add, edit, weight, enable/disable, delete.
 - **YouTube**: search mode and estimated quota left today.

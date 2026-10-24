@@ -8,6 +8,7 @@ const EventPicker = lazy(() => import("./pages/EventPicker"));
 const HostScreen = lazy(() => import("./pages/HostScreen"));
 const HostRemote = lazy(() => import("./pages/HostRemote"));
 const HostAdmin = lazy(() => import("./pages/HostAdmin"));
+const HistoryPage = lazy(() => import("./pages/HistoryPage"));
 
 const loading = <main className="center-page"><p className="muted">Loading…</p></main>;
 const host = (page) => <HostGate><Suspense fallback={loading}>{page}</Suspense></HostGate>;
@@ -31,6 +32,7 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/join" element={<JoinApp />} />
       <Route path="/join/:code" element={<JoinApp />} />
+      <Route path="/history" element={<Suspense fallback={loading}><HistoryPage /></Suspense>} />
       <Route path="/host" element={host(<EventPicker />)} />
       <Route path="/host/admin" element={host(<HostAdmin />)} />
       <Route path="/host/event/:eventId" element={host(<HostScreen />)} />

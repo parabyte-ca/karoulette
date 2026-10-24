@@ -378,3 +378,52 @@ test("Main Stage banner on the TV and phones, a swapped-in upload and the join l
   await expect(tv.locator("html")).not.toHaveAttribute("data-banner", "");
   await api.put("/api/host/appearance/banner-all", { data: { on: false } });
 });
+
+test("song history: every event's songs, merged singer names, CSV export and the public page", async ({ browser }) => {
+  const { ctx, ev, api } = await hostWithEvent(browser, "History Night", { ready_seconds: 0 });
+  const al = await joinPhone(browser, ev, "Al");
+  const alan = await joinPhone(browser, ev, "Alan");
+  await queue(al, "Toto - Africa (Karaoke Version)");
+  await queue(alan, "ABBA - Dancing Queen (Karaoke)");
+  await api.post(`/api/host/events/${ev.id}/actions/start`);
+  await finishSong(api, ev);
+  await finishSong(api, ev);
+
+  const admin = await ctx.newPage();
+  await admin.goto("/host/admin");
+  await admin.getByRole("button", { name: "Song history" }).click();
+  const list = admin.locator(".history-table");
+  await expect(list).toContainText("Toto - Africa");
+  await expect(list).toContainText("History Night");
+
+  // Al and Alan are the same person: merge them.
+  await admin.getByText(/Singer names/).click();
+  const nameRow = (n) => admin.locator(".name-list li").filter({ has: admin.locator("strong", { hasText: new RegExp(`^${n}$`) }) });
+  await nameRow("Al").getByRole("checkbox").check();
+  await nameRow("Alan").getByRole("checkbox").check();
+  await admin.getByLabel("Show them as").fill("Alan");
+  await admin.getByRole("button", { name: /Merge 2 names/ }).click();
+  await expect(admin.locator(".toast")).toContainText("Merged 2 names as Alan");
+  await expect(admin.locator(".chart-card", { hasText: "Top singers" })).toContainText("Alan");
+  await expect(list).toContainText("(as Al)");
+
+  const download = admin.waitForEvent("download");
+  await admin.getByRole("button", { name: /Export all as CSV/ }).click();
+  const csv = await (await download).createReadStream().then(async (s) => {
+    let text = "";
+    for await (const chunk of s) text += chunk;
+    return text;
+  });
+  expect(csv).toContain("date,time,event,singer");
+  expect(csv).toContain("History Night,Alan,,Toto - Africa (Karaoke Version)");
+
+  // Guests can see it at /history until the host stops sharing it.
+  const guestCtx = await phoneContext(browser);
+  const guest = await guestCtx.newPage();
+  await guest.goto("/history");
+  await expect(guest.locator(".history-table")).toContainText("ABBA - Dancing Queen");
+  await admin.getByText(/Share it with guests/).click();
+  await guest.reload();
+  await expect(guest.getByText("The host hasn't shared the song history.")).toBeVisible();
+  await api.put("/api/host/history/public", { data: { on: true } });
+});

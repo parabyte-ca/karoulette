@@ -5,8 +5,9 @@ import { Toasts, useToasts } from "../components/Toasts";
 import UpdatesTab from "./UpdatesTab";
 import AppearanceTab from "./AppearanceTab";
 import BackupsTab from "./BackupsTab";
+import HistoryTab from "./HistoryTab";
 
-const TABS = [["events", "Events"], ["themes", "Themes"], ["youtube", "YouTube"], ["appearance", "Appearance"], ["updates", "Updates"], ["backups", "Backups"], ["security", "Security"]];
+const TABS = [["events", "Events"], ["history", "Song history"], ["themes", "Themes"], ["youtube", "YouTube"], ["appearance", "Appearance"], ["updates", "Updates"], ["backups", "Backups"], ["security", "Security"]];
 
 function ThemesTab({ push }) {
   const [themes, setThemes] = useState([]);
@@ -150,7 +151,7 @@ function EventSettings({ eventId, push, onChanged }) {
   };
 
   const del = async () => {
-    if (!window.confirm("Delete this event and all its history permanently?")) return;
+    if (!window.confirm("Delete this event permanently? Its songs leave the Song history too. (Export them first if you want to keep them.)")) return;
     try { await api(`/api/host/events/${eventId}`, { method: "DELETE" }); onChanged(true); } catch (err) { push(err.message, "error"); }
   };
 
@@ -370,6 +371,7 @@ export default function HostAdmin() {
         ))}
       </nav>
       {tab === "events" && <EventsTab push={push} />}
+      {tab === "history" && <HistoryTab push={push} />}
       {tab === "themes" && <ThemesTab push={push} />}
       {tab === "youtube" && <YouTubeTab push={push} />}
       {tab === "appearance" && <AppearanceTab push={push} />}
