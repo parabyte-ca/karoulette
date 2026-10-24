@@ -35,7 +35,7 @@ Karoulette runs your karaoke party from one TV and everyone's phones. The TV (ho
 - **Embed errors** (IFrame codes 101/150 and others) auto-skip the song, notify the singer, and their next pick plays straight away.
 - **Real-time sync** over WebSockets; full state persisted in SQLite so a restart resumes the event, queue and all.
 - **Multiple events** with a start/end lifecycle and a short join code. Song history per event with **CSV export**.
-- **Duplicate prevention** per event (host-configurable).
+- **Duplicate prevention** per event (host-configurable): the same song from any karaoke channel counts, and phones mark search results already sung or queued tonight.
 - **Seven colour schemes**, switchable live from Host admin → Appearance (TV, phones and admin repaint instantly, even mid-event): **Neon Night** (original), **On Air** (broadcast studio), **Synthwave Sunset** (80s outrun), **Velvet Lounge** (jazz club), **Northern Lights** (Canadian aurora), **Mirror Ball** (70s disco, with light flecks sweeping the room) and **Main Stage** (a festival headliner with a band photo across the top like a marquee). Each has its own background art and display font, and all stay dark and high-contrast.
 - **Banner photo**: Main Stage's band photo, or upload your own and show it with any skin. It runs across the top of the TV, behind the QR and smoke break screens, on the recap, on guests' phones and in the preview when the join link is shared.
 - **Backups in Host admin**: make and download a backup any time, restore one from the list (including the automatic pre-upgrade backups) or from a file. The current database is saved first, so a restore can be undone.

@@ -50,7 +50,7 @@
 
 **Queue:** play order = `position` ascending among `queued`. Host can reorder (drag / up-down), remove. Auto-advance on `ENDED`; on IFrame errors 101/150 (also 100 / 2 / 5) mark `error`, auto-skip, notify the singer and grant them a re-pick (a bonus turn inserted ahead of the normal rotation).
 
-**Duplicates:** if enabled, reject a `video_id` already queued/played in this event.
+**Duplicates:** if enabled, reject a song already queued/playing/played in this event: the same `video_id`, or the same `logic.song_key` (artist and title normalised, order-independent, karaoke words stripped) so other channels' versions count (since v0.11.2). Skipped and errored songs don't block. Search results carry `already`/`blocked` flags.
 
 ## 4. YouTube
 
