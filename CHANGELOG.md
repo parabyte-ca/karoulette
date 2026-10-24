@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.10.0] - 2026-10-24
+### Added
+- **Song history** (Host admin → Song history): every song sung or skipped at every event, newest first, with who sang it (and any duet partner), the date and time, and the event.
+  - Filter by event, singer, date range and played/skipped, or search songs, singers and events. Click a bar in a chart to filter by it.
+  - Stats: songs, singers, events and hours of music, plus top singers, most-sung songs and songs per event.
+  - Song details: duet partner, Superset and theme, cheers, and a link to the YouTube video.
+  - **Export as CSV**: downloads whatever the filters show (or everything).
+  - **Merge singer names**: the same name with different capitals or spaces already counts as one singer; tick names that are really one person ("Al" and "Alan") to merge them, and unmerge any time.
+- **Public song history** at `/history`: a read-only copy of the dashboard for guests. On by default; switch it off in Host admin → Song history.
+
+### Changed
+- Deleting an event warns that its songs leave the song history too.
+
+## [0.9.2] - 2026-10-24
+### Fixed
+- **Singers losing their turn and sliding to the bottom of the queue.** Three cases are fixed:
+  - When a singer's song couldn't play (blocked from embedding), their replacement song was counted in the next round, so they skipped a round and their next song landed at the very end. The replacement now takes the failed song's turn.
+  - While a song the host put first (**Play next**) was playing, anyone still to sing in that round who added a song was pushed to the next round.
+  - The same happened during a Superset turn.
+
 ## [0.9.1] - 2026-10-23
 ### Fixed
 - TV screen on a phone or narrow window: the "Scan to join" box, smoke break and recap were cut off between songs. The box now grows to fit them.

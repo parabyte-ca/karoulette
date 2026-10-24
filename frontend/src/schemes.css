@@ -21,6 +21,7 @@
   --accent-hover: #ff5c96;
   --on-accent: #ffffff;
   --accent-2: #3dd6ff;
+  --chart-1: #05a2c5;            /* bars in charts: validated in the dark-mode band, >= 3:1 on --card */
   --highlight: #ffd23f;
   --on-highlight: #1a1400;
   --green: #3ddc84;
@@ -64,6 +65,7 @@
   --accent-hover: #ff4f5a;
   --on-accent: #ffffff;
   --accent-2: #ffb547;
+  --chart-1: #c48308;            /* bars in charts: validated in the dark-mode band, >= 3:1 on --card */
   --highlight: #ffe08a;
   --on-highlight: #241a00;
   --green: #4ade80;
@@ -112,6 +114,7 @@
   --accent-hover: #ff66dc;
   --on-accent: #1a0019;
   --accent-2: #2de2e6;
+  --chart-1: #13a6a9;            /* bars in charts: validated in the dark-mode band, >= 3:1 on --card */
   --highlight: #ffb03b;
   --on-highlight: #2a1300;
   --green: #45f0a5;
@@ -165,6 +168,7 @@
   --accent-hover: #f0627a;
   --on-accent: #ffffff;
   --accent-2: #e9c98b;
+  --chart-1: #b58b2b;            /* bars in charts: validated in the dark-mode band, >= 3:1 on --card */
   --highlight: #f2cf7d;
   --on-highlight: #2a1a00;
   --green: #7fd6a1;
@@ -213,6 +217,7 @@
   --accent-hover: #63f5ba;
   --on-accent: #022116;
   --accent-2: #9d8cff;
+  --chart-1: #907eef;            /* bars in charts: validated in the dark-mode band, >= 3:1 on --card */
   --highlight: #ffe57a;
   --on-highlight: #251d00;
   --green: #36f1a6;
@@ -270,6 +275,7 @@
   --accent-hover: #ff72b7;
   --on-accent: #2a0016;
   --accent-2: #7fe7ff;
+  --chart-1: #0aa3bd;            /* bars in charts: validated in the dark-mode band, >= 3:1 on --card */
   --highlight: #ffcc33;
   --on-highlight: #2a1a00;
   --green: #52e3a0;
@@ -330,6 +336,7 @@
   --accent-hover: #ff5e5e;
   --on-accent: #1c0000;
   --accent-2: #4da3ff;
+  --chart-1: #3e95f0;            /* bars in charts: validated in the dark-mode band, >= 3:1 on --card */
   --highlight: #ffb547;
   --on-highlight: #241400;
   --green: #4fe0a0;

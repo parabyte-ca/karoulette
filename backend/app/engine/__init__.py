@@ -14,6 +14,7 @@ from .constants import (ACTIVE_QUEUE_STATUSES, COLOUR_SCHEMES, DEFAULT_SCHEME, J
 from .core import EngineBase
 from .events import EventsMixin
 from .guests import GuestsMixin
+from .history import HistoryMixin
 from .lastcall import LastCallMixin
 from .playback import PlaybackMixin
 from .queue import QueueMixin
@@ -23,7 +24,7 @@ from .views import ViewsMixin
 
 
 class Engine(EventsMixin, GuestsMixin, ThemesMixin, SupersetsMixin, QueueMixin, PlaybackMixin, LastCallMixin,
-             ViewsMixin, EngineBase):
+             HistoryMixin, ViewsMixin, EngineBase):
     """Everything an event can do. See each mixin's module for its part."""
 
 

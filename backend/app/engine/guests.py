@@ -11,14 +11,19 @@ class GuestsMixin:
     # ------------------------------------------------------------------ singer order
 
     def _anchor(self, ev: dict) -> dict | None:
-        """The singer on the mic, or the last one to sing in the current round."""
+        """Where the current round has got to: the singer on the mic, or the last one to sing in the round.
+        Superset turns and songs put first (by the host, or a re-pick after an error) are outside the
+        rotation, so they don't count: otherwise singers still to come in the round would lose their turn."""
         item = None
         if ev["now_playing_item_id"]:
             item = self.db.one("SELECT * FROM queue_items WHERE id = ?", (ev["now_playing_item_id"],))
+            if item and (item["priority"] is not None or item["set_id"]):
+                item = None
         if item is None and ev["current_round"]:
             item = self.db.one(
                 "SELECT * FROM queue_items WHERE event_id = ? AND status IN ('played', 'skipped', 'error') "
-                "AND COALESCE(round_no, ?) = ? AND priority IS NULL ORDER BY played_at DESC, id DESC LIMIT 1",
+                "AND COALESCE(round_no, ?) = ? AND priority IS NULL AND set_id IS NULL "
+                "ORDER BY played_at DESC, id DESC LIMIT 1",
                 (ev["id"], ev["current_round"], ev["current_round"]))
         return self._guest(item["guest_id"]) if item else None
 

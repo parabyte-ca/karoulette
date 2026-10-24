@@ -53,6 +53,10 @@ class QueueMixin:
         round_no = logic.assign_round(ev["current_round"], self._anchor_pos(ev), guest["rotation_pos"], last_round)
         priority = None
         if guest["repick_credit"]:  # their last song couldn't play: this one goes straight to the front
+            failed = self.db.one("SELECT round_no FROM queue_items WHERE guest_id = ? AND status = 'error' "
+                                 "AND set_id IS NULL ORDER BY id DESC LIMIT 1", (guest_id,))
+            if failed and failed["round_no"]:  # and takes that song's turn, so they don't lose a round
+                round_no = failed["round_no"]
             queued = self._items(ev["id"], ("queued",))
             priority = max((q["priority"] for q in queued if q["priority"] is not None), default=0) + 1
             self.db.execute("UPDATE guests SET repick_credit = 0 WHERE id = ?", (guest_id,))
