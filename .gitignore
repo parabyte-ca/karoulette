@@ -15,6 +15,7 @@ data/
 *.db-wal
 *.db-shm
 secret.key
+generated-host-pin.txt
 .env
 
 # OS / editor

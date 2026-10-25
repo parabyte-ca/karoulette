@@ -105,10 +105,13 @@ All settings live in `.env` (see `.env.example`).
 | `KQ_PORT` | `8095` | Host port (container listens on 8000) |
 | `KQ_DATA_DIR` | `./data` | Host folder for `karoulette.db` (mounted at `/data`) |
 | `PUID` / `PGID` | `568` | User the container runs as |
-| `HOST_PIN` | _(required)_ | Host PIN or password, 4+ characters. When set, it always wins over a PIN changed in admin |
+| `HOST_PIN` | _(required)_ | Host PIN or password, 4+ characters (use 8+ or a passphrase if Karoulette is on the internet). When set, it always wins over a PIN changed in admin |
 | `YOUTUBE_API_KEY` | _(blank)_ | YouTube Data API v3 key. Blank = yt-dlp fallback search |
 | `YOUTUBE_DAILY_QUOTA` | `10000` | Daily quota used for the remaining-quota estimate |
 | `SPOTIFY_CLIENT_ID` | _(blank)_ | Optional: the Client ID of your Spotify app, for Spotify playlists (or set it in Host admin → Song history → Playlists) |
+| `KQ_BIND` | `0.0.0.0` | Address the port is published on. `127.0.0.1` when everyone comes in through a proxy or tunnel on this host |
+| `KQ_TRUSTED_PROXIES` | `127.0.0.1,172.16.0.0/12` | Addresses allowed to pass the real client IP (`X-Forwarded-For`): this host and Docker networks. Never `*` |
+| `CSP_MODE` | `report` | Content-Security-Policy: `report` (browser console only), `enforce`, or `off` |
 | `PUBLIC_BASE_URL` | _(blank)_ | Site address used in the QR code and join link previews, e.g. `https://karaoke.example.ca` (just the root; a pasted `/join` or `/host` is stripped). Blank = the address the TV used |
 | `VAPID_SUBJECT` | _(blank)_ | Optional contact for push alert services, e.g. `mailto:you@example.ca`. Blank = `PUBLIC_BASE_URL` when it's HTTPS |
 | `SECRET_KEY` | _(generated)_ | Signs host session cookies |
@@ -124,9 +127,20 @@ All settings live in `.env` (see `.env.example`).
 
 **Quota maths**: a new search costs about 101 units (100 for `search.list` + 1 for `videos.list`), so the default 10,000-unit daily quota covers roughly 99 fresh searches; repeated searches within 24 hours are served from the cache for free. Quota resets at midnight Pacific time.
 
-**Reverse proxy** (Nginx Proxy Manager, Cloudflare Tunnel): enable **WebSockets support**, forward to `http://<nas-ip>:8095`, and set `PUBLIC_BASE_URL` so the QR code uses the public address. Make sure the proxy passes `X-Forwarded-For` (both do by default): join and search limits are per guest address.
+**Reverse proxy** (Nginx Proxy Manager, Cloudflare Tunnel): enable **WebSockets support**, forward to `http://<nas-ip>:8095`, and set `PUBLIC_BASE_URL` so the QR code uses the public address. Make sure the proxy passes `X-Forwarded-For` (both do by default): join, search and login limits are per guest address. Karoulette only believes that header from `KQ_TRUSTED_PROXIES` (this host and Docker networks by default). After an update, `docker logs karoulette | grep "signed in from"` should show real addresses, not `172.x`; if it shows `172.x` for everyone, add your proxy's address to `KQ_TRUSTED_PROXIES`.
 
 **Monitoring with Uptime Kuma**: add a monitor of type **HTTP(s) - Keyword**, URL `http://<nas-ip>:8095/api/health`, keyword `"status":"ok"`, interval 60 seconds. It returns 200 only when the app and its database answer, and 503 otherwise. The response also lists the version, active events and live connections (or use a **HTTP(s) - Json Query** monitor with `status` = `ok`). Docker's own health check uses the same endpoint.
+
+## Security
+
+- **Report a vulnerability** privately: GitHub > Security > Report a vulnerability (see [SECURITY.md](SECURITY.md)).
+- **On the internet**: publish Karoulette only over HTTPS (Cloudflare Tunnel or a reverse proxy) and put `/host*` and `/api/host/*` behind Cloudflare Access with MFA. Guest pages (`/join`, `/api/guest/*`, `/api/public/*`, `/ws/*`) stay open. A Cloudflare rate-limit rule on `/api/host/login` adds a second lock.
+- **Host PIN**: 8+ characters or a passphrase. After 20 wrong PINs in 15 minutes (from anywhere) the login locks for the rest of that window; failed and successful logins are logged with the address. Changing the PIN in Host admin signs out every other screen.
+- **Container**: runs as UID 568 with a read-only filesystem, no Linux capabilities, `no-new-privileges`, and memory and process limits. Images on GHCR are signed (cosign keyless) and carry provenance and SBOM attestations:
+  `cosign verify ghcr.io/parabyte-ca/karoulette:latest --certificate-identity-regexp '^https://github.com/parabyte-ca/karoulette/' --certificate-oidc-issuer https://token.actions.githubusercontent.com`
+- **Automated checks**: the Security workflow (gitleaks over full history, CodeQL, Semgrep, Trivy image and config scans, pip-audit, npm audit, SBOM) runs on every PR and weekly; Dependabot opens weekly update PRs.
+- **Song history** is public at `/history` unless you switch sharing off in Host admin > Song history.
+- **Backups** contain the PIN hash and the push signing key: keep the data folder on a snapshotted dataset with an offsite copy.
 
 ## Usage
 
