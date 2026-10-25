@@ -577,7 +577,7 @@ test("push alerts: pick kinds, turn on, follow the phone to a new event, the ser
     Object.defineProperty(Notification, "permission", { get: () => "granted" });
     Notification.requestPermission = async () => "granted";
     const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    const endpoint = "https://127.0.0.1:9/push/e2e";
+    const endpoint = "https://fcm.googleapis.com/fcm/send/e2e-test";
     const wrap = (keys) => keys && { endpoint, toJSON: () => ({ endpoint, keys }),
       unsubscribe: async () => { localStorage.removeItem("e2e_push"); return true; } };
     PushManager.prototype.getSubscription = async () => wrap(JSON.parse(localStorage.getItem("e2e_push")));

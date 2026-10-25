@@ -37,12 +37,15 @@ ask() {
 
 ask KQ_PORT "Host port" "8095"
 ask KQ_DATA_DIR "Data folder (TrueNAS: /mnt/<pool>/apps/karoulette)" "./data"
-ask HOST_PIN "Host PIN or password (4+ characters)" "" secret
+ask HOST_PIN "Host PIN or password (8+ characters recommended)" "" secret
 ask YOUTUBE_API_KEY "YouTube Data API v3 key (blank = backup search)" "" secret
 ask PUBLIC_BASE_URL "Public site address for the QR code, e.g. https://karaoke.example.ca (blank = auto)" ""
 
 PIN="$(get_env HOST_PIN)"
 [[ ${#PIN} -ge 4 ]] || die "HOST_PIN must be at least 4 characters. Edit .env and re-run."
+[[ ${#PIN} -ge 8 ]] || warn "HOST_PIN is short. Use 8+ characters or a passphrase if Karoulette is reachable from the internet."
+[[ -n "$(get_env KQ_TRUSTED_PROXIES)" ]] || set_env KQ_TRUSTED_PROXIES "127.0.0.1,172.16.0.0/12"
+[[ "$(get_env KQ_TRUSTED_PROXIES)" != *"*"* ]] || die "KQ_TRUSTED_PROXIES must not contain *. List your proxy's addresses."
 if [[ -z "$(get_env SECRET_KEY)" ]]; then
   set_env SECRET_KEY "$(head -c 48 /dev/urandom | base64 | tr -d '\n/+=' | cut -c1-48)"
   ok "generated SECRET_KEY"

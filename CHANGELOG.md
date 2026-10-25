@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.16.0] - 2026-10-25
+### Security
+- **Real client addresses only from your proxy.** Karoulette used to believe `X-Forwarded-For` from anyone, so a visitor could fake their address and get past the login, join and search limits. It now trusts it only from `KQ_TRUSTED_PROXIES` (default: this host and Docker networks, which covers Cloudflare Tunnel and Nginx Proxy Manager). The address list is logged at start-up.
+- **Host login lockout**: after 20 wrong PINs in 15 minutes, from any number of addresses, the login locks for the rest of that window. Failed and successful logins are logged with the address. The PIN check no longer pauses the TV and phones while it runs.
+- **Stronger PIN hashing** (PBKDF2 600,000 iterations). Existing PINs keep working and are upgraded on the next login. A warning is logged if `HOST_PIN` is shorter than 8 characters.
+- **Changing the PIN signs out every other screen.**
+- **Push alerts only go to real push services** (Google, Mozilla, Apple, Microsoft), so a phone can't point the server at addresses inside your network.
+- **Security headers**: Content-Security-Policy (report-only by default; set `CSP_MODE=enforce` once the browser console on the TV is clean), Permissions-Policy, and HSTS over HTTPS. Host WebSocket connections must come from this site.
+- Guest tokens are hidden in the access log. A generated host PIN goes to `generated-host-pin.txt` in the data folder (readable by the app user only) instead of the log.
+- **Container hardening** (docker-compose): read-only filesystem with a small `/tmp`, no Linux capabilities, `no-new-privileges`, 1 GB memory and 256-process limits, and `KQ_BIND` to publish on `127.0.0.1` only. pip is removed from the image (its bundled libraries had known vulnerabilities).
+- **Signed images**: GHCR images now carry provenance and SBOM attestations and a cosign signature; the CI token is read-only except for the job that publishes.
+- **Automated security checks**: a Security workflow (gitleaks, CodeQL, Semgrep, Trivy, pip-audit, npm audit, SBOM) on every PR and weekly, Dependabot updates, `SECURITY.md`, `CODEOWNERS`, and `scripts/github-harden.sh` to switch on branch protection and secret scanning.
+
+### Upgrade notes
+- Updates apply the new `docker-compose.yml` automatically. If your reverse proxy connects from an address outside `127.0.0.1` or `172.16.0.0/12`, set `KQ_TRUSTED_PROXIES` in `.env`, or every guest shares one rate limit. Check with `docker logs karoulette | grep "signed in from"`.
+- If anything fails to start because of the read-only filesystem, `update.sh` rolls back automatically; please report what the log says.
+
 ## [0.15.0] - 2026-10-25
 ### Added
 - **❤️ Likes**: guests tap the heart on anyone else's song, waiting or singing, on their phone's Queue tab. The count shows on the TV's up-next list and on the singer's own phone. Likes are just love: they never move a song.

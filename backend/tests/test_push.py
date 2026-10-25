@@ -149,10 +149,10 @@ def test_guest_push_endpoints_and_delivery(tmp_path):
         h = {"Authorization": f"Bearer {guest['token']}"}
         key, keys = phone()
         assert c.post("/api/guest/push", json={"endpoint": "http://bad", "keys": keys}, headers=h).status_code == 422
-        r = c.post("/api/guest/push", json={"endpoint": "https://push.example/1", "keys": keys,
+        r = c.post("/api/guest/push", json={"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": keys,
                                             "prefs": {"playlist": False}}, headers=h)
         assert r.json()["prefs"] == {"turn": True, "superset": True, "duet": True, "playlist": False}
-        r = c.put("/api/guest/push/prefs", json={"endpoint": "https://push.example/1", "prefs": {"duet": False}}, headers=h)
+        r = c.put("/api/guest/push/prefs", json={"endpoint": "https://fcm.googleapis.com/fcm/send/1", "prefs": {"duet": False}}, headers=h)
         assert r.json()["prefs"]["duet"] is False and r.json()["prefs"]["playlist"] is False
 
         c.post(f"/api/host/events/{ev['id']}/actions/start")
@@ -165,8 +165,8 @@ def test_guest_push_endpoints_and_delivery(tmp_path):
                                  auth_secret=unb64url(keys["auth"]), version="aes128gcm")
         assert json.loads(plain)["title"] == "🎤 You're up!"
 
-        assert c.post("/api/guest/push/off", json={"endpoint": "https://push.example/1"}, headers=h).json()["ok"]
-        assert c.put("/api/guest/push/prefs", json={"endpoint": "https://push.example/1", "prefs": {}},
+        assert c.post("/api/guest/push/off", json={"endpoint": "https://fcm.googleapis.com/fcm/send/1"}, headers=h).json()["ok"]
+        assert c.put("/api/guest/push/prefs", json={"endpoint": "https://fcm.googleapis.com/fcm/send/1", "prefs": {}},
                      headers=h).status_code == 404
 
 

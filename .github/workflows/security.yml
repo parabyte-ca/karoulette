@@ -1,0 +1,146 @@
+# Security checks: secrets (full history), dependency CVEs, static analysis, image and config scanning, SBOM.
+# Runs on every push to main, every PR, and weekly so new CVEs surface even when nothing changes.
+# Scanner images are pinned by digest. Trivy's own releases were compromised in March 2026 (v0.69.4-v0.69.6);
+# 0.75.0 postdates the clean-up. Actions are pinned to commit SHAs (version in the comment); Dependabot
+# (github-actions, with a 7-day cooldown) proposes updates.
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 7 * * 1"   # Mondays 07:23 UTC (03:23 Toronto)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+  TRIVY_IMAGE: aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+
+jobs:
+  secrets:
+    name: gitleaks (full history)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan every commit
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo:ro" "$GITLEAKS_IMAGE" \
+            git /repo --redact --no-banner --exit-code 1
+
+  dependencies:
+    name: Dependency CVEs (pip-audit, npm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - name: pip-audit
+        run: |
+          python -m pip install --quiet pip-audit==2.10.1
+          pip-audit -r backend/requirements.txt --strict --progress-spinner off
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "22"
+      - name: npm audit (high and critical fail the build)
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        with:
+          category: /language:${{ matrix.language }}
+
+  semgrep:
+    name: Semgrep (OWASP, Python, JS, Docker, Actions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - name: Semgrep scan
+        run: |
+          python -m pip install --quiet "semgrep>=1.100,<2"
+          semgrep scan --error --metrics=off \
+            --config p/owasp-top-ten --config p/python --config p/javascript \
+            --config p/dockerfile --config p/github-actions \
+            --exclude frontend/e2e --exclude backend/tests
+
+  image:
+    name: Trivy (image, config) and SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Build the image locally (not pushed)
+        run: docker build -t karoulette:scan .
+      - name: Trivy image scan (fails on fixable HIGH/CRITICAL)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" "$TRIVY_IMAGE" \
+            image --quiet --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 \
+            --format sarif --output /out/trivy-image.sarif karoulette:scan
+      - name: Trivy config scan (Dockerfile, compose, workflows)
+        if: always()
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -v "$PWD:/out" "$TRIVY_IMAGE" \
+            config --quiet --severity HIGH,CRITICAL --exit-code 1 \
+            --skip-dirs /src/frontend/node_modules --format sarif --output /out/trivy-config.sarif /src
+      - name: SBOM (CycloneDX)
+        if: always()
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" "$TRIVY_IMAGE" \
+            image --quiet --format cyclonedx --output /out/sbom.cdx.json karoulette:scan
+      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        if: always()
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+        if: always()
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          retention-days: 90
