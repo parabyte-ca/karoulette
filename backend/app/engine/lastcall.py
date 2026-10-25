@@ -45,6 +45,7 @@ class LastCallMixin:
             return
         ready = int(ev["config"]["ready_seconds"])
         if self._queue_ends_at(ev) + ready + (duration_s or UNKNOWN_DURATION_S) > closing:
+            self.log(ev["id"], "songs", f"Refused a {what}: past last call ({logic.clock_text(closing)})", refused="last_call")
             raise EngineError(f"🔔 Last call! The queue already runs to closing time ({logic.clock_text(closing)}), "
                               f"so there's no room for another {what}.", 409)
 
@@ -53,6 +54,8 @@ class LastCallMixin:
         info = self.last_call_info(ev)
         if info and not info["open"] and not ev["last_call_announced"]:
             self._set(ev["id"], last_call_announced=1)
+            self.log(ev["id"], "event", f"Last call: the queue now runs to closing time ({info['closing_text']})",
+                     automatic=True)
             self.notice(ev["id"], f"🔔 Last call! The queue now runs to closing time ({info['closing_text']}).",
                         "gold", kind="last_call")
             self.emit(ev["id"], "last_call", {"closing_text": info["closing_text"]})

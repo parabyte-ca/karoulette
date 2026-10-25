@@ -492,3 +492,35 @@ test("playlists: an event's page, the TV recap QR, the phone recap and saving to
   await expect(page).toHaveURL(new RegExp(`/playlist/${ev.join_code}$`));
   await api.put("/api/host/playlists/spotify", { data: { client_id: "" } });
 });
+
+test("timeline, archive and delete for good in Host admin", async ({ browser }) => {
+  const { ctx, ev, api } = await hostWithEvent(browser, "Timeline Night", { ready_seconds: 0 });
+  const phone = await joinPhone(browser, ev, "Rae");
+  await queue(phone, "Toto - Africa (Karaoke Version)");
+  await api.post(`/api/host/events/${ev.id}/actions/start`);
+  await api.post(`/api/host/events/${ev.id}/actions/skip-song`);
+  await api.post(`/api/host/events/${ev.id}/actions/end`);
+
+  const admin = await ctx.newPage();
+  await admin.goto("/host/admin");
+  await admin.getByRole("button", { name: /Timeline Night/ }).click();
+  const timeline = admin.locator(".timeline");
+  await expect(timeline).toContainText("Rae added “Toto - Africa”, round 1");
+  await expect(timeline).toContainText("Skipped “Toto - Africa” (Rae)");
+  await admin.getByLabel("Who").selectOption("Rae");
+  await expect(timeline.locator("li")).toHaveCount(2);          // joined, added
+
+  await admin.getByRole("button", { name: "🗄 Archive" }).click();
+  await expect(admin.locator(".toast")).toContainText("Archived");
+  await expect(admin.getByRole("button", { name: "Unarchive" })).toBeVisible();
+  const picker = await ctx.newPage();
+  await picker.goto("/host");
+  await expect(picker.getByText("Timeline Night")).toHaveCount(0);   // hidden from the TV's list
+
+  admin.once("dialog", (d) => d.accept("wrong name"));
+  await admin.getByRole("button", { name: "Delete for good" }).click();
+  await expect(admin.locator(".toast", { hasText: "nothing was deleted" })).toBeVisible();
+  admin.once("dialog", (d) => d.accept("Timeline Night"));
+  await admin.getByRole("button", { name: "Delete for good" }).click();
+  await expect.poll(async () => (await (await api.get("/api/host/events")).json()).some((e) => e.id === ev.id)).toBe(false);
+});

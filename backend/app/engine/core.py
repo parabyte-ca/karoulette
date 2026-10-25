@@ -4,11 +4,17 @@ from __future__ import annotations
 import json
 import random
 import time
+from contextvars import ContextVar
 from typing import Callable
 
 from .. import logic
 from ..db import Database
 from .constants import EngineError
+
+
+# Who is acting, for the timeline: ("host", None, "Host"), ("guest", id, name). Unset = Karoulette itself
+# (autoplay, the vote timer). The web layer sets it per request.
+ACTOR: ContextVar[tuple | None] = ContextVar("karoulette_actor", default=None)
 
 
 class EngineBase:
@@ -30,6 +36,21 @@ class EngineBase:
         """A toast for phones and the TV. ``kind`` tags notices the TV already shows as a big banner."""
         data = {"text": text, "level": level, **({"kind": kind} if kind else {})}
         self.emit(event_id, "notice", data, guest_id)
+
+    def log(self, event_id: int, kind: str, text: str, automatic: bool = False, **data) -> None:
+        """Add a line to the event's timeline (Host admin → Events → Timeline). ``automatic`` credits
+        Karoulette (what plays next, new rounds) even when someone's action set it off."""
+        actor_type, actor_id, actor_name = (None if automatic else ACTOR.get()) or ("system", None, "Karoulette")
+        self.db.execute("INSERT INTO event_log(event_id, at, kind, actor_type, actor_id, actor_name, text, data) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (event_id, self.clock(), kind, actor_type, actor_id, actor_name, text, json.dumps(data)))
+
+    def _song(self, item: dict | None) -> str:
+        return f"“{logic.song_name(item['title'])}”" if item else "a song"
+
+    def _who(self, guest_id: int | None) -> str:
+        g = self.db.one("SELECT display_name FROM guests WHERE id = ?", (guest_id,)) if guest_id else None
+        return g["display_name"] if g else "someone"
 
     def drain(self) -> list[dict]:
         out, self.outbox = self.outbox, []

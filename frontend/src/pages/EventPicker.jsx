@@ -22,8 +22,8 @@ export default function EventPicker() {
     }
   };
 
-  const open = (events || []).filter((e) => e.status !== "ended");
-  const ended = (events || []).filter((e) => e.status === "ended");
+  const open = (events || []).filter((e) => e.status !== "ended" && !e.archived_at);
+  const ended = (events || []).filter((e) => e.status === "ended" && !e.archived_at);
 
   return (
     <main className="page">

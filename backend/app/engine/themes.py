@@ -91,6 +91,8 @@ class ThemesMixin:
             (event_id, number, theme["id"] if theme else None, theme["name"] if theme else None,
              self.clock() if theme else None, self.clock()))
         self._set(event_id, current_round=number, current_round_id=round_id)
+        self.log(event_id, "playback", f"Round {number} started" + (f": theme {theme['name']}" if theme else ""),
+                 automatic=True)
         self.emit(event_id, "round_changed", {"number": number, "theme": self._theme_out(theme)})
         if theme:
             self._emit_spin(event_id, number, theme)
@@ -117,4 +119,5 @@ class ThemesMixin:
             raise EngineError("Add or enable at least one theme first")
         self.db.execute("UPDATE rounds SET theme_id = ?, theme_name = ?, spun_at = ? WHERE id = ?",
                         (theme["id"], theme["name"], self.clock(), rnd["id"]))
+        self.log(event_id, "event", f"Round {rnd['number']} theme re-spun: {theme['name']}")
         self._emit_spin(event_id, rnd["number"], theme)

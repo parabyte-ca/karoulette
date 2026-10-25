@@ -1,6 +1,7 @@
-"""The uploaded banner image: one JPEG, PNG or WebP kept in ``<data>/banner/``."""
+"""The uploaded banner image: one JPEG, PNG or WebP, stored in the database."""
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 MAX_BYTES = 8_000_000
@@ -26,8 +27,27 @@ def sniff(data: bytes) -> str | None:
 
 
 class BannerStore:
-    def __init__(self, data_path: Path):
-        self.dir = Path(data_path) / "banner"
+    """Kept in the database (the ``files`` table) so every backup and restore carries it."""
+    NAME = "banner"
+
+    def __init__(self, db, data_path: Path | None = None):
+        self.db = db
+        self.legacy_dir = Path(data_path) / "banner" if data_path else None
+
+    def migrate(self) -> None:
+        """Before v0.12.0 the banner was a file in <data>/banner/: copy it into the database if it isn't
+        there. The file is left in place, so restoring an older backup can still find it."""
+        if not self.legacy_dir or self._row():
+            return
+        for ext in TYPES:
+            old = self.legacy_dir / f"banner.{ext}"
+            if old.is_file():
+                self.db.execute("INSERT OR REPLACE INTO files(name, mime, data, updated_at) VALUES (?, ?, ?, ?)",
+                                (self.NAME, TYPES[ext], old.read_bytes(), time.time()))
+                return
+
+    def _row(self) -> dict | None:
+        return self.db.one("SELECT data, mime FROM files WHERE name = ?", (self.NAME,))
 
     def save(self, data: bytes) -> str:
         if len(data) > MAX_BYTES:
@@ -35,17 +55,18 @@ class BannerStore:
         ext = sniff(data)
         if not ext:
             raise BannerError("Upload a JPEG, PNG or WebP image.")
-        self.dir.mkdir(parents=True, exist_ok=True)
-        self.delete()
-        tmp = self.dir / f"banner.{ext}.tmp"
-        tmp.write_bytes(data)
-        tmp.replace(self.dir / f"banner.{ext}")
+        self.db.execute("INSERT OR REPLACE INTO files(name, mime, data, updated_at) VALUES (?, ?, ?, ?)",
+                        (self.NAME, TYPES[ext], data, time.time()))
         return ext
 
-    def path(self, ext: str) -> Path | None:
-        path = self.dir / f"banner.{ext}"
-        return path if ext in TYPES and path.is_file() else None
+    def get(self) -> tuple[bytes, str] | None:
+        if not self._row():
+            self.migrate()  # e.g. a backup from before v0.12.0 was just restored
+        row = self._row()
+        return (bytes(row["data"]), row["mime"]) if row else None
 
     def delete(self) -> None:
-        for ext in TYPES:
-            (self.dir / f"banner.{ext}").unlink(missing_ok=True)
+        self.db.execute("DELETE FROM files WHERE name = ?", (self.NAME,))
+        if self.legacy_dir:  # and any old file, or it would come back
+            for ext in TYPES:
+                (self.legacy_dir / f"banner.{ext}").unlink(missing_ok=True)

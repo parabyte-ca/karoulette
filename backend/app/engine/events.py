@@ -25,11 +25,13 @@ class EventsMixin:
                 break
         event_id = self.db.insert("INSERT INTO events(name, join_code, config, created_at) VALUES (?, ?, ?, ?)",
                                   (name, code, json.dumps(cfg), self.clock()))
+        self.log(event_id, "event", f"Event “{name}” created (join code {code})")
         return self.get_event(event_id)
 
     def list_events(self) -> list[dict]:
         rows = self.db.all(
             "SELECT e.id, e.name, e.join_code, e.status, e.created_at, e.started_at, e.ended_at, e.current_round, "
+            "e.archived_at, "
             "(SELECT COUNT(*) FROM guests g WHERE g.event_id = e.id AND g.status = 'active') AS guest_count, "
             "(SELECT COUNT(*) FROM queue_items q WHERE q.event_id = e.id AND q.status = 'played') AS songs_played "
             "FROM events e ORDER BY e.id DESC")
@@ -52,6 +54,11 @@ class EventsMixin:
             fields["last_call_announced"] = 0  # a new closing time gets its own announcement
         if fields:
             self._set(event_id, **fields)
+            changed = [f"name → {fields['name']}"] if "name" in fields and fields["name"] != ev["name"] else []
+            changed += [f"{k} {ev['config'].get(k)!r} → {v!r}" for k, v in fields.get("config", {}).items()
+                        if ev["config"].get(k) != v]
+            if changed:
+                self.log(event_id, "settings", "Settings changed: " + "; ".join(changed))
         rnd = self._round(ev["current_round_id"])
         if (config or {}).get("themes_enabled") and not ev["config"]["themes_enabled"] and rnd \
                 and ev["status"] == "active" and self._pick_theme(event_id):
@@ -66,6 +73,7 @@ class EventsMixin:
         if ev["status"] != "active":
             self._set(event_id, status="active", started_at=ev["started_at"] or self.clock())
             self.notice(event_id, "The event has started. Let's sing!")
+            self.log(event_id, "event", "Event started")
         if ev["current_round"] == 0:
             self._start_round(event_id, 1)
         ev = self.get_event(event_id)
@@ -91,7 +99,24 @@ class EventsMixin:
                   paused=0)
         self.emit(event_id, "event_ended")
         self.notice(event_id, "Thanks for singing! This event has ended.")
+        self.log(event_id, "event", "Event ended (songs still waiting were dropped)")
 
     def delete_event(self, event_id: int) -> None:
+        """Erase an event for good: its singers, songs and timeline go too (archive keeps them)."""
         self.get_event(event_id)
         self.db.execute("DELETE FROM events WHERE id = ?", (event_id,))
+
+    def archive_event(self, event_id: int, archived: bool = True) -> dict:
+        """Hide an event from the lists while keeping its songs in the history and playlists."""
+        ev = self.get_event(event_id)
+        if archived and ev["status"] == "active":
+            raise EngineError("End the event before archiving it.", 409)
+        self._set(event_id, archived_at=self.clock() if archived else None)
+        self.log(event_id, "event", "Event archived" if archived else "Event unarchived")
+        return self.get_event(event_id)
+
+    def event_timeline(self, event_id: int) -> list[dict]:
+        self.get_event(event_id)
+        return [{**r, "data": json.loads(r["data"] or "{}")} for r in self.db.all(
+            "SELECT id, at, kind, actor_type, actor_id, actor_name, text, data FROM event_log "
+            "WHERE event_id = ? ORDER BY at, id", (event_id,))]

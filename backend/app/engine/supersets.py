@@ -76,6 +76,9 @@ class SupersetsMixin:
         how = ("This song kicks it off. " if mode == "now" else
                "It starts after this song. " if playing else "")
         what = f"songs like “{logic.song_name(inspired['title'])}”" if inspired else f"“{theme_name}”"
+        self.log(event_id, "superset", f"Superset started: {theme_name} ({'this song kicks it off' if mode == 'now' else 'after this song'}"
+                 f"; {'called by the host' if source == 'host' else 'random' if source == 'random' else 'voted in'}; "
+                 f"order: {', '.join(g['display_name'] for g in order)})", automatic=source != "host")
         self.notice(event_id, f"★ SUPERSET! Everyone sings {what}. {how}Pick a song that fits: "
                               "we'll go round in singer order.", "gold", kind="superset")
         theme_out = self._theme_out(theme) or {"id": None, "name": theme_name, "description": ""}
@@ -110,6 +113,8 @@ class SupersetsMixin:
     def _finish_set(self, sset: dict, status: str, text: str) -> None:
         self.db.execute("UPDATE superset_sets SET status = ?, ended_at = ? WHERE id = ?",
                         (status, self.clock(), sset["id"]))
+        self.log(sset["event_id"], "superset", "Superset finished: back to the queue" if status == "done"
+                 else "Superset ended early (unsung picks dropped)", automatic=status == "done")
         self.notice(sset["event_id"], text, "success" if status == "done" else "info")
         self.emit(sset["event_id"], "superset", {"active": False, "ended": status})
 
@@ -125,6 +130,7 @@ class SupersetsMixin:
         self.db.execute("UPDATE superset_slots SET status = 'passed', item_id = NULL WHERE set_id = ? AND guest_id = ?",
                         (sset["id"], guest_id))
         self.notice(guest["event_id"], f"{guest['display_name']} sits this Superset out.")
+        self.log(guest["event_id"], "superset", f"{guest['display_name']} sat the Superset out", guest_id=guest_id)
         self._nudge(guest["event_id"])
 
     def skip_superset_turn(self, event_id: int) -> None:
@@ -136,6 +142,7 @@ class SupersetsMixin:
         self.db.execute("UPDATE superset_slots SET status = 'skipped' WHERE set_id = ? AND guest_id = ?",
                         (sset["id"], slot["guest_id"]))
         self.notice(event_id, f"The host skipped {self._guest(slot['guest_id'])['display_name']}'s Superset turn.")
+        self.log(event_id, "superset", f"Skipped {self._who(slot['guest_id'])}'s Superset turn (no pick yet)")
         self._nudge(event_id)
 
     def _nudge(self, event_id: int) -> None:
@@ -200,6 +207,7 @@ class SupersetsMixin:
         what = (f"kicked off by “{logic.song_name(self.db.one('SELECT title FROM queue_items WHERE id = ?', (playing,))['title'])}”"
                 if playing else "after this song")
         self.notice(ev["id"], f"★ {guest['display_name']} calls a SUPERSET, {what}! Vote on your phone.", "gold")
+        self.log(ev["id"], "superset", f"{guest['display_name']} called a Superset vote, {what}", guest_id=guest_id)
         self.emit(ev["id"], "superset_vote", {"status": "open", "name": guest["display_name"], "mode": mode})
         return self.db.one("SELECT * FROM superset_votes WHERE id = ?", (vote_id,))
 
@@ -213,6 +221,7 @@ class SupersetsMixin:
         self.db.execute("INSERT INTO superset_ballots(vote_id, guest_id, yes) VALUES (?, ?, ?) "
                         "ON CONFLICT(vote_id, guest_id) DO UPDATE SET yes = excluded.yes",
                         (vote["id"], guest_id, int(bool(yes))))
+        self.log(guest["event_id"], "superset", f"{guest['display_name']} voted {'yes' if yes else 'no'}", guest_id=guest_id)
         self.emit(guest["event_id"], "superset_vote", {"status": "open", "voted": True})
         self._settle_vote(vote)
 
@@ -232,6 +241,7 @@ class SupersetsMixin:
     def _close_vote(self, vote: dict, status: str, text: str, level: str = "info") -> None:
         self.db.execute("UPDATE superset_votes SET status = ?, closed_at = ? WHERE id = ?",
                         (status, self.clock(), vote["id"]))
+        self.log(vote["event_id"], "superset", f"Superset vote {status}: {text}", automatic=status != "cancelled")
         self.notice(vote["event_id"], text, level)
         self.emit(vote["event_id"], "superset_vote", {"status": status})
 

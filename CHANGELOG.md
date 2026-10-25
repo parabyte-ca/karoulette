@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.0] - 2026-10-25
+### Added
+- **Archive events** (Host admin → Events): hides an event from the TV's event list and the admin list (tick "Show archived events" to see them) while keeping its songs in the Song history and playlists. Unarchive any time. Running events must be ended first.
+- **Event timeline** (Host admin → Events, under each event): everything that happened, newest first, with the time and who did it (the host, a singer by name, or "automatic" for what Karoulette did itself). Covers starts, ends and smoke breaks; joins, leaves, Bouche! and moves; songs added (with the round they landed in), removed, put first, re-picked or swapped; skips, stops and songs that couldn't play; what played next and new rounds; Supersets called, voted, started, picked, sat out, skipped and finished; last call; duplicate and last-call refusals; settings changes. Filter by type or person, search, and export to CSV.
+
+### Changed
+- **Delete for good** replaces Delete and asks you to type the event's name, since it erases the event's songs from the history too (Archive keeps them).
+- **The uploaded banner is stored in the database**, so backups and restores include it. An existing banner file is copied in on upgrade (and still found if you restore an older backup).
+
 ## [0.11.2] - 2026-10-25
 ### Fixed
 - **Stronger duplicate detection.** It used to catch only the exact same YouTube video, so the same song from another karaoke channel got through (e.g. "Stuck With You" from Reekies and from Party Tyme in one Superset). Songs now match by artist and title whatever the channel or wording: capitals, accents, punctuation, "&"/"and"/commas, "The", "ft. ...", "(Karaoke Version)", "In the Style of ..." and artist/title order are all ignored.
