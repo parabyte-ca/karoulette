@@ -140,12 +140,12 @@ All settings live in `.env` (see `.env.example`).
 ### Host admin (`/host/admin`)
 - **Playlists** (Song history → Playlists): YouTube playlists of the original songs work straight away. For Spotify, create a free app at developer.spotify.com, add the redirect URI shown there (your HTTPS address + `/spotify`), and paste its Client ID. In Spotify's development mode, only accounts added under User Management can sign in.
 - **Song history**: every song from every event, with filters, stats (top singers, most-sung songs, songs per event), CSV export of what's showing, and merging the names one singer has used. Guests can see a read-only copy at `/history` unless you switch sharing off.
-- **Events**: settings, singer order (move up/down, **Bouche!**, rejoin codes), round themes, phone remote, CSV export, delete.
+- **Events**: settings, singer order (move up/down, **Bouche!**, rejoin codes), round themes, phone remote, CSV export, the event **timeline** (who did what, filterable, CSV), **archive** (hide an event, keep its songs) and delete for good.
 - **Themes**: add, edit, weight, enable/disable, delete.
 - **YouTube**: search mode and estimated quota left today.
 - **Appearance**: live mini-mockups of each colour scheme; one click switches every screen. Upload a banner photo (JPEG, PNG or WebP, up to 8 MB), remove it, or show it with every skin.
 - **Updates**: running version, latest release and notes, check now, one-click upgrade with live progress and log.
-- **Backups**: make and download a backup, restore from the list or a file, delete old ones.
+- **Backups**: make and download a backup, restore from the list or a file, delete old ones. Backups include the uploaded banner.
 - **Security**: change the PIN (when not set by `HOST_PIN`), sign out.
 
 ### Demo data

@@ -4,9 +4,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import html
+import csv
 import io
 import logging
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -18,11 +20,11 @@ from pydantic import BaseModel, Field
 
 from . import auth
 from .backups import BackupError, Backups
-from .banner import TYPES as BANNER_TYPES
 from .banner import BannerError, BannerStore
 from .config import Settings
 from .db import Database
 from .engine import REACTIONS, Engine, EngineError
+from .engine.core import ACTOR
 from .ratelimit import RateLimiter
 from .updates import UpdateError, UpdateService
 from .ws import Client, Hub
@@ -160,7 +162,8 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     yt = youtube or YouTubeService(db, settings.youtube_api_key, settings.youtube_daily_quota, settings.enable_ytdlp)
     upd = updates or UpdateService(db, settings.version, settings.source_repo, settings.upgrade_dir)
     backups = Backups(db, settings.data_path, settings.version)
-    banners = BannerStore(settings.data_path)
+    banners = BannerStore(db, settings.data_path)
+    banners.migrate()
     started_at = time.time()
     hub = Hub()
     lock = asyncio.Lock()
@@ -259,17 +262,21 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         if not lim.allow(key):
             raise HTTPException(429, f"Slow down a little. Try again in {lim.retry_after(key)} seconds.")
 
-    def require_host(request: Request) -> None:
+    # These are async so they run in the request's own task: the actor they set reaches the engine's timeline.
+    async def require_host(request: Request) -> None:
         if not auth.check_session(settings.secret_key, request.cookies.get(auth.COOKIE_NAME)):
             raise HTTPException(401, "Host login required")
+        ACTOR.set(("host", None, "Host"))
 
-    def current_guest(request: Request) -> dict:
+    async def current_guest(request: Request) -> dict:
         header = request.headers.get("authorization", "")
         token = header[7:] if header.lower().startswith("bearer ") else ""
         try:
-            return engine.guest_by_token(token)
+            guest = engine.guest_by_token(token)
         except EngineError as exc:
             raise HTTPException(exc.status, exc.message) from exc
+        ACTOR.set(("guest", guest["id"], guest["display_name"]))
+        return guest
 
     def base_url(request: Request) -> str:
         return settings.public_base_url or str(request.base_url).rstrip("/")
@@ -323,6 +330,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     @app.post("/api/guest/join")
     async def guest_join(body: JoinIn, request: Request):
         limit("join", client_ip(request))
+        ACTOR.set(("guest", None, body.name.strip()[:24]))
         try:
             ev = engine.event_by_code(body.code)
         except EngineError as exc:
@@ -506,6 +514,30 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         await run(engine.update_event, event_id, body.name, body.config, event_id=event_id)
         return {"ok": True}
 
+    @app.post("/api/host/events/{event_id}/archive", dependencies=host)
+    async def archive_event(event_id: int, body: SwitchIn):
+        return await run(engine.archive_event, event_id, body.on, event_id=event_id)
+
+    @app.get("/api/host/events/{event_id}/timeline", dependencies=host)
+    async def event_timeline(event_id: int):
+        try:
+            return engine.event_timeline(event_id)
+        except EngineError as exc:
+            raise HTTPException(exc.status, exc.message) from exc
+
+    @app.get("/api/host/events/{event_id}/timeline.csv", dependencies=host)
+    async def event_timeline_csv(event_id: int):
+        ev = get_event_or_404(event_id)
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["time_utc", "kind", "who", "what"])
+        for r in engine.event_timeline(event_id):
+            w.writerow([datetime.fromtimestamp(r["at"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                        r["kind"], r["actor_name"], r["text"]])
+        safe = "".join(c if c.isalnum() else "-" for c in ev["name"]).strip("-")[:40] or "event"
+        return PlainTextResponse(buf.getvalue(), media_type="text/csv",
+                                 headers={"Content-Disposition": f'attachment; filename="karoulette-{safe}-timeline.csv"'})
+
     @app.delete("/api/host/events/{event_id}", dependencies=host)
     async def delete_event(event_id: int):
         await run(engine.delete_event, event_id)
@@ -566,6 +598,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
 
     @app.post("/api/host/events/{event_id}/player", dependencies=host)
     async def player(event_id: int, body: PlayerIn):
+        ACTOR.set(None)  # the TV reporting the end of a song: what follows is automatic, not the host
         if body.state == "ended":
             await run(engine.player_ended, event_id, body.item_id, event_id=event_id)
         else:
@@ -747,13 +780,12 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
 
     @app.get("/api/public/banner")
     async def public_banner():
-        custom = db.get_setting("banner_custom")
-        path = banners.path(custom["ext"]) if custom else None
-        if not path:
+        stored = banners.get() if db.get_setting("banner_custom") else None
+        if not stored:
             raise HTTPException(404, "No banner uploaded")
         # The URL carries a version, so browsers can keep it until a new banner is uploaded.
-        return FileResponse(path, media_type=BANNER_TYPES[custom["ext"]],
-                            headers={"Cache-Control": "public, max-age=31536000, immutable"})
+        return Response(stored[0], media_type=stored[1],
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
     @app.put("/api/host/appearance/banner", dependencies=host)
     async def upload_banner(request: Request):

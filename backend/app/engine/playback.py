@@ -76,6 +76,12 @@ class PlaybackMixin:
                              ev["current_round"], item["id"]))
         ready = int(ev["config"]["ready_seconds"])
         self._set(event_id, now_playing_item_id=item["id"], ready_until=self.clock() + ready if ready else None)
+        singers = self._who(item["guest_id"]) + (f" & {self._who(item['duet_guest_id'])}" if item["duet_guest_id"] else "")
+        where = ("Superset turn" if self._in_superset(ev, item) else
+                 f"played out of turn (round {item['round_no']})" if item["priority"] is not None else
+                 f"round {item['round_no'] or ev['current_round']}")
+        self.log(event_id, "playback", f"Now playing: {singers}, {self._song(item)} ({where})", automatic=True,
+                 item_id=item["id"])
         guest = self._guest(item["guest_id"])
         self.emit(event_id, "now_playing", {"item_id": item["id"], "video_id": item["video_id"],
                                             "title": item["title"], "guest_id": guest["id"],
@@ -98,6 +104,7 @@ class PlaybackMixin:
             return
         self.stop_playback(event_id)
         self._set(event_id, paused=1)
+        self.log(event_id, "event", "Smoke break: queue on hold")
         self.emit(event_id, "queue_paused")
         self.notice(event_id, "🚬 Smoke break! The queue is on hold. Keep adding songs.", kind="paused")
 
@@ -106,6 +113,7 @@ class PlaybackMixin:
         if not ev["paused"]:
             return
         self._set(event_id, paused=0)
+        self.log(event_id, "event", "Smoke break over: queue resumed")
         self.emit(event_id, "queue_resumed")
         self.notice(event_id, "Break's over! Back to the music. 🎤", "success")
         if ev["status"] == "active" and not ev["now_playing_item_id"]:
@@ -147,6 +155,9 @@ class PlaybackMixin:
             self.play_next(event_id)
             return
         self.db.execute("UPDATE queue_items SET status = 'skipped' WHERE id = ?", (ev["now_playing_item_id"],))
+        item = self.db.one("SELECT * FROM queue_items WHERE id = ?", (ev["now_playing_item_id"],))
+        self.log(event_id, "playback", f"Skipped {self._song(item)} ({self._who(item['guest_id'])})",
+                 item_id=item["id"])
         self._set(event_id, now_playing_item_id=None)
         self.notice(event_id, "The host skipped the current song.")
         self.play_next(event_id)
@@ -163,6 +174,9 @@ class PlaybackMixin:
                             "set_id IN (SELECT id FROM superset_sets WHERE status = 'active')",
                             (ev["now_playing_item_id"],))
             self._set(event_id, now_playing_item_id=None, ready_until=None)
+            item = self.db.one("SELECT * FROM queue_items WHERE id = ?", (ev["now_playing_item_id"],))
+            self.log(event_id, "playback", f"Stopped {self._song(item)} ({self._who(item['guest_id'])}); "
+                     "it goes back to the front of the queue", item_id=item["id"])
             self.emit(event_id, "now_playing", {"item": None})
 
     def player_error(self, event_id: int, item_id: int, code: int) -> None:
@@ -184,6 +198,9 @@ class PlaybackMixin:
         else:
             follow_up = f". {guest['display_name']}'s next pick plays straight away" if active else ""
         self.notice(event_id, f"“{item['title']}” {reason}. Skipping it{follow_up}.", "warning")
+        self.log(event_id, "playback", f"{self._song(item)} ({guest['display_name']}) couldn't play (YouTube error "
+                 f"{code}), skipped" + (f"; {guest['display_name']} picks again" if active else ""),
+                 item_id=item_id, code=code)
         if active and not in_set:
             self.db.execute("UPDATE guests SET repick_credit = 1 WHERE id = ?", (guest["id"],))
             self.emit(event_id, "song_error", {"item_id": item_id, "code": code, "title": item["title"]},

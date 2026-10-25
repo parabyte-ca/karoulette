@@ -568,3 +568,15 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 .setup-steps code { word-break: break-all; background: var(--input); padding: 0.05em 0.35em; border-radius: 4px; }
 .result.already img, .result.already .r-title { opacity: 0.55; }
 .r-already { color: var(--orange); font-weight: 700; font-size: 0.85em; }
+
+/* ---------- Event timeline */
+.timeline { list-style: none; margin: 0.8em 0 0; padding: 0; max-height: 34em; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+.timeline li { display: grid; grid-template-columns: 6.8em 1.6em 1fr; gap: 0.4em; align-items: baseline; padding: 0.4em 0.8em; border-top: 1px solid var(--line); }
+.timeline li:first-child { border-top: 0; }
+.tl-time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.85em; }
+.tl-icon { text-align: center; }
+.tl-who { margin-left: 0.5em; padding: 0 0.5em; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-weight: 700; white-space: nowrap; }
+.tl-who.tl-host { color: var(--accent-2); border-color: var(--accent-2); }
+.tl-who.tl-guest { color: var(--highlight); border-color: var(--highlight); }
+.timeline .tl-superset .tl-icon { color: var(--highlight); }
+@media (max-width: 600px) { .timeline li { grid-template-columns: 5.4em 1.4em 1fr; padding: 0.4em 0.5em; } }

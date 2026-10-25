@@ -28,6 +28,9 @@ class QueueMixin:
         if ev["config"]["prevent_duplicates"]:
             dup = logic.find_duplicate(self._items(ev["id"]), video["video_id"], video.get("title") or "")
             if dup:
+                self.log(ev["id"], "songs", f"{guest['display_name']} was refused “{logic.song_name(video.get('title') or '')}”: "
+                         f"duplicate of {self._song(dup)} ({dup['status']}, picked by {self._who(dup['guest_id'])})",
+                         guest_id=guest_id, refused="duplicate")
                 who = "you" if dup["guest_id"] == guest_id else self._guest(dup["guest_id"])["display_name"]
                 when = "is already in the queue" if dup["status"] == "queued" else "has already been sung tonight"
                 raise EngineError(f"“{logic.song_name(dup['title'])}” {when} (picked by {who}). Pick another!", 409)
@@ -69,6 +72,10 @@ class QueueMixin:
             "duration_s, thumbnail, position, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
             (ev["id"], guest_id, duet_guest_id, round_no, priority, video["video_id"], video["title"][:200],
              (video.get("channel") or "")[:120], video.get("duration_s"), video.get("thumbnail") or "", self.clock()))
+        how = "re-pick after a song that couldn't play: plays next" if priority is not None else f"round {round_no}"
+        duet = f" (duet with {self._who(duet_guest_id)})" if duet_guest_id else ""
+        self.log(ev["id"], "songs", f"{guest['display_name']} added “{logic.song_name(video['title'])}”{duet}, {how}",
+                 guest_id=guest_id, item_id=item_id, round=round_no, priority=priority)
         self.emit(ev["id"], "song_queued", {"item_id": item_id, "guest_id": guest_id,
                                             "name": guest["display_name"], "title": video["title"]})
         if duet_guest_id is not None:
@@ -89,6 +96,8 @@ class QueueMixin:
              video.get("thumbnail") or "", self.clock()))
         self.db.execute("UPDATE superset_slots SET status = 'picked', item_id = ? WHERE set_id = ? AND guest_id = ?",
                         (item_id, sset["id"], guest["id"]))
+        self.log(ev["id"], "superset", f"{guest['display_name']} picked “{logic.song_name(video['title'])}” for the Superset",
+                 guest_id=guest["id"], item_id=item_id)
         self.emit(ev["id"], "song_queued", {"item_id": item_id, "guest_id": guest["id"], "superset": True,
                                             "name": guest["display_name"], "title": video["title"]})
         if duet_guest_id is not None:
@@ -110,6 +119,8 @@ class QueueMixin:
         if item["status"] == "playing":
             self.skip_song(event_id)
             return
+        self.log(event_id, "songs", f"{self._song(item)} ({self._who(item['guest_id'])}) removed from the queue",
+                 item_id=item_id)
         self.db.execute("UPDATE queue_items SET status = 'removed' WHERE id = ?", (item_id,))
         if item["set_id"] and self._in_superset(self.get_event(event_id), item):  # a Superset pick: pick again
             self.db.execute("UPDATE superset_slots SET status = 'pending', item_id = NULL WHERE item_id = ?",
@@ -129,6 +140,8 @@ class QueueMixin:
         queued = self._items(event_id, ("queued",))
         front = min((q["priority"] for q in queued if q["priority"] is not None), default=1.0) - 1
         self.db.execute("UPDATE queue_items SET priority = ? WHERE id = ?", (front, item_id))
+        self.log(event_id, "songs", f"{self._song(item)} ({self._who(item['guest_id'])}) put first with Play next "
+                 f"(it keeps its round-{item['round_no']} place in the rotation)", item_id=item_id)
         self.emit(event_id, "queue_reordered")
 
     def move_my_song_up(self, guest_id: int, item_id: int) -> None:
@@ -144,6 +157,8 @@ class QueueMixin:
         for src, dst in ((a, b), (b, a)):
             self.db.execute("UPDATE queue_items SET round_no = ?, priority = ?, order_bias = ? WHERE id = ?",
                             (src["round_no"], src["priority"], src["order_bias"], dst["id"]))
+        self.log(guest["event_id"], "songs", f"{guest['display_name']} swapped {self._song(b)} ahead of {self._song(a)}",
+                 guest_id=guest_id)
         self.emit(guest["event_id"], "queue_reordered")
 
     def let_next_go_first(self, guest_id: int, item_id: int) -> None:
@@ -170,6 +185,7 @@ class QueueMixin:
                             (new_round, bias, mine["id"]))
         nxt_name = self._guest(nxt["guest_id"])["display_name"]
         self.notice(event_id, f"{guest['display_name']} let {nxt_name} go first.")
+        self.log(event_id, "songs", f"{guest['display_name']} let {nxt_name} go first", guest_id=guest_id)
         self.emit(event_id, "queue_reordered")
 
     def leave_duet(self, guest_id: int, item_id: int) -> None:
@@ -179,6 +195,8 @@ class QueueMixin:
         if item["duet_guest_id"] != guest_id or item["status"] != "queued":
             raise EngineError("You're not on that duet.", 409)
         self.db.execute("UPDATE queue_items SET duet_guest_id = NULL WHERE id = ?", (item_id,))
+        self.log(guest["event_id"], "songs", f"{guest['display_name']} stepped out of the duet on {self._song(item)}",
+                 guest_id=guest_id, item_id=item_id)
         self.notice(guest["event_id"], f"{guest['display_name']} stepped out of a duet.", guest_id=item["guest_id"])
         self.emit(guest["event_id"], "queue_reordered")
 
@@ -191,6 +209,8 @@ class QueueMixin:
         self.db.execute("INSERT OR IGNORE INTO flags(queue_item_id, flagged_by, created_at) VALUES (?, ?, ?)",
                         (item_id, flagged_by, self.clock()))
         count = self.db.one("SELECT COUNT(*) AS n FROM flags WHERE queue_item_id = ?", (item_id,))["n"]
+        self.log(event_id, "superset", f"{self._song(item)} ({self._who(item['guest_id'])}) flagged as not fitting "
+                 f"the Superset ({count} flag{'s' if count != 1 else ''})", item_id=item_id)
         self.emit(event_id, "song_flagged", {"item_id": item_id, "count": count, "title": item["title"]})
         return count
 

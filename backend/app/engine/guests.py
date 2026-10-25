@@ -36,7 +36,7 @@ class GuestsMixin:
 
     def join(self, event_id: int, display_name: str) -> tuple[dict, str]:
         ev = self.get_event(event_id)
-        if ev["status"] == "ended":
+        if ev["status"] == "ended" or ev["archived_at"]:
             raise EngineError("This event has ended", 410)
         name = logic.clean_name(display_name)
         if not 1 <= len(name) <= 24:
@@ -53,6 +53,8 @@ class GuestsMixin:
              self.clock(), int(singing_started), self._new_rejoin_code(event_id)))
         if singing_started:  # new singers join the end of the singer order; they're announced at their debut
             self.notice(event_id, f"🎉 New singer! {name} joins the end of the line-up.", "success")
+        self.log(event_id, "singers", f"{name} joined" + (", at the end of the singer order" if singing_started else ""),
+                 guest_id=guest_id)
         sset = self._active_set(event_id)
         if sset:  # they get a turn at the end of a Superset that's under way
             last = self.db.one("SELECT MAX(position) AS p FROM superset_slots WHERE set_id = ?", (sset["id"],))["p"]
@@ -95,6 +97,7 @@ class GuestsMixin:
         token = secrets.token_urlsafe(32)
         self.db.execute("UPDATE guests SET token_hash = ? WHERE id = ?", (hash_token(token), g["id"]))
         self.emit(event_id, "session_replaced", {}, guest_id=g["id"])
+        self.log(event_id, "singers", f"{g['display_name']} rejoined on another phone (rejoin code)", guest_id=g["id"])
         return self._guest(g["id"]), token
 
     def guest_by_token(self, token: str) -> dict:
@@ -122,6 +125,9 @@ class GuestsMixin:
 
     def leave(self, guest_id: int) -> None:
         g = self._guest(guest_id)
+        if g["status"] == "active":
+            self.log(g["event_id"], "singers", f"{g['display_name']} left (their waiting songs were dropped)",
+                     guest_id=guest_id)
         self._drop_guest(guest_id, "left", f"{g['display_name']} has left the party.")
 
     def remove_guest(self, guest_id: int) -> None:
@@ -129,6 +135,8 @@ class GuestsMixin:
         g = self._guest(guest_id)
         if g["status"] != "active":
             return
+        self.log(g["event_id"], "singers", f"{g['display_name']} was BOUCHED (removed with their waiting songs)",
+                 guest_id=guest_id)
         self._drop_guest(guest_id, "removed", f"🥖 {g['display_name']} has been BOUCHED!", kind="bouched")
         self.emit(g["event_id"], "bouched", {"guest_id": guest_id, "name": g["display_name"]})
 
@@ -143,4 +151,6 @@ class GuestsMixin:
         other = order[j]
         self.db.execute("UPDATE guests SET rotation_pos = ? WHERE id = ?", (other["rotation_pos"], guest_id))
         self.db.execute("UPDATE guests SET rotation_pos = ? WHERE id = ?", (g["rotation_pos"], other["id"]))
+        self.log(g["event_id"], "singers", f"{g['display_name']} moved {'up' if direction < 0 else 'down'} the singer "
+                 f"order, swapping with {other['display_name']}", guest_id=guest_id)
         self.emit(g["event_id"], "order_changed")

@@ -179,6 +179,26 @@ CREATE TABLE IF NOT EXISTS song_originals (            -- the original recording
     found_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS event_log (                -- the timeline: who did what during an event
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    at REAL NOT NULL,
+    kind TEXT NOT NULL,                            -- event | settings | singers | songs | playback | superset
+    actor_type TEXT NOT NULL,                      -- host | guest | system
+    actor_id INTEGER,                              -- the guest, when a guest did it
+    actor_name TEXT NOT NULL,
+    text TEXT NOT NULL,
+    data TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS ix_event_log ON event_log(event_id, at);
+
+CREATE TABLE IF NOT EXISTS files (                    -- small uploads kept in the database (so backups carry them)
+    name TEXT PRIMARY KEY,
+    mime TEXT NOT NULL,
+    data BLOB NOT NULL,
+    updated_at REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS quota_ledger (
     day TEXT PRIMARY KEY,
     units_used INTEGER NOT NULL DEFAULT 0,
@@ -210,6 +230,8 @@ ADDED_COLUMNS = [
     ("events", "last_call_announced", "INTEGER NOT NULL DEFAULT 0"),
     ("queue_items", "duet_guest_id", "INTEGER"),       # second singer on a duet
     ("guests", "rejoin_code", "TEXT"),                 # lets a singer get back in on another phone
+    # v0.12.0
+    ("events", "archived_at", "REAL"),                 # hidden from the lists, kept in the song history
 ]
 
 

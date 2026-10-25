@@ -60,7 +60,7 @@ class ViewsMixin:
         return {
             "server_time": now,
             "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"], "status": ev["status"],
-                      "config": ev["config"], "paused": bool(ev["paused"])},
+                      "config": ev["config"], "paused": bool(ev["paused"]), "archived_at": ev["archived_at"]},
             "round": {"number": ev["current_round"], "is_superset": superset is not None,
                       "theme": (self._theme_out(theme) or {"id": None, "name": rnd["theme_name"], "description": ""})
                       if themed else None,

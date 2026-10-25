@@ -6,6 +6,7 @@ import UpdatesTab from "./UpdatesTab";
 import AppearanceTab from "./AppearanceTab";
 import BackupsTab from "./BackupsTab";
 import HistoryTab from "./HistoryTab";
+import Timeline from "../components/Timeline";
 
 const TABS = [["events", "Events"], ["history", "Song history"], ["themes", "Themes"], ["youtube", "YouTube"], ["appearance", "Appearance"], ["updates", "Updates"], ["backups", "Backups"], ["security", "Security"]];
 
@@ -150,8 +151,20 @@ function EventSettings({ eventId, push, onChanged }) {
     } catch (err) { push(err.message, "error"); }
   };
 
+  const archived = !!state.event.archived_at;
+  const archive = async (on) => {
+    try {
+      await api(`/api/host/events/${eventId}/archive`, { method: "POST", body: { on } });
+      push(on ? "Archived. Its songs stay in the Song history and playlists." : "Unarchived.", "success");
+      load();
+      onChanged();
+    } catch (err) { push(err.message, "error"); }
+  };
   const del = async () => {
-    if (!window.confirm("Delete this event permanently? Its songs leave the Song history too. (Export them first if you want to keep them.)")) return;
+    const typed = window.prompt(`Delete “${state.event.name}” for good? Its singers, songs and timeline are erased and `
+      + "leave the Song history and playlists. This can't be undone (Archive keeps them).\n\nType the event's name to confirm:");
+    if (typed === null) return;
+    if (typed.trim() !== state.event.name) { push("The name didn't match, so nothing was deleted.", "warning"); return; }
     try { await api(`/api/host/events/${eventId}`, { method: "DELETE" }); onChanged(true); } catch (err) { push(err.message, "error"); }
   };
 
@@ -202,7 +215,11 @@ function EventSettings({ eventId, push, onChanged }) {
           <a className="btn" href={`/playlist/${state.event.join_code}`} target="_blank" rel="noreferrer">🎶 Playlist</a>
           <a className="btn" href={`/api/host/events/${eventId}/history.csv`}>Export song history (CSV)</a>
           <span className="spacer" />
-          <button type="button" className="btn btn-danger" onClick={del}>Delete event</button>
+          {archived ? <button type="button" className="btn" onClick={() => archive(false)}>Unarchive</button>
+            : <button type="button" className="btn" disabled={state.event.status === "active"}
+                      title={state.event.status === "active" ? "End the event first" : "Hide it, keep its songs"}
+                      onClick={() => archive(true)}>🗄 Archive</button>}
+          <button type="button" className="btn btn-danger" onClick={del}>Delete for good</button>
         </div>
       </form>
 
@@ -254,6 +271,8 @@ function EventSettings({ eventId, push, onChanged }) {
         )}
         {!state.rounds.length && !state.superset_history.length && <p className="muted">Nothing yet.</p>}
       </section>
+
+      <Timeline eventId={eventId} push={push} />
     </>
   );
 }
@@ -261,10 +280,13 @@ function EventSettings({ eventId, push, onChanged }) {
 function EventsTab({ push }) {
   const [events, setEvents] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
   const load = (clear) => api("/api/host/events").then((evs) => {
     setEvents(evs);
-    if (clear || !selected) setSelected(evs[0]?.id ?? null);
+    if (clear || !selected) setSelected(evs.find((e) => !e.archived_at)?.id ?? evs[0]?.id ?? null);
   }).catch((e) => push(e.message, "error"));
+  const archivedCount = events.filter((e) => e.archived_at).length;
+  const listed = events.filter((e) => showArchived || !e.archived_at || e.id === selected);
   useEffect(() => { load(); }, []);
 
   return (
@@ -273,12 +295,18 @@ function EventsTab({ push }) {
         <h2>Events</h2>
         {!events.length && <p className="muted">No events yet. <Link to="/host">Create one</Link>.</p>}
         <div className="row wrap">
-          {events.map((ev) => (
+          {listed.map((ev) => (
             <button key={ev.id} className={`btn ${selected === ev.id ? "btn-primary" : ""}`} onClick={() => setSelected(ev.id)}>
-              {ev.name} <span className="muted small">({ev.status})</span>
+              {ev.archived_at ? "🗄 " : ""}{ev.name} <span className="muted small">({ev.archived_at ? "archived" : ev.status})</span>
             </button>
           ))}
         </div>
+        {archivedCount > 0 && (
+          <label className="check">
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+            <span>Show archived events ({archivedCount})</span>
+          </label>
+        )}
       </section>
       {selected && <EventSettings key={selected} eventId={selected} push={push} onChanged={load} />}
     </>
