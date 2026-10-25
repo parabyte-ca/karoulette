@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { decodeEntities } from "../lib/format";
 import PlaylistButtons from "./PlaylistButtons";
+import { AwardsBoard } from "./Crowd";
 
 const day = (t) => new Date(t * 1000).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" });
 const time = (t) => new Date(t * 1000).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" });
@@ -74,7 +75,7 @@ function download(rows) {
 }
 
 /** Every song sung at every event: filters, stats, the list and a CSV of what's showing. */
-export default function HistoryDashboard({ songs }) {
+export default function HistoryDashboard({ songs, awards = null }) {
   const [q, setQ] = useState("");
   const [eventId, setEventId] = useState("");
   const [singer, setSinger] = useState("");
@@ -114,6 +115,7 @@ export default function HistoryDashboard({ songs }) {
 
   return (
     <div className="history">
+      <AwardsBoard awards={awards} />
       <div className="history-filters" role="search">
         <input type="search" placeholder="Search songs, singers, events…" value={q} aria-label="Search"
                onChange={(e) => { setQ(e.target.value); setShown(PAGE); }} />

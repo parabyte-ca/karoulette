@@ -227,6 +227,29 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (       -- a phone's Web Push subs
     created_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS likes (                    -- a guest's ❤️ on someone else's song (never reorders)
+    item_id INTEGER NOT NULL REFERENCES queue_items(id) ON DELETE CASCADE,
+    guest_id INTEGER NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (item_id, guest_id)
+);
+
+CREATE TABLE IF NOT EXISTS song_requests (            -- "Suggest a song for…": one guest's idea for another
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    from_guest_id INTEGER NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
+    to_guest_id INTEGER NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
+    video_id TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    channel TEXT NOT NULL DEFAULT '',
+    thumbnail TEXT NOT NULL DEFAULT '',
+    duration_s INTEGER,
+    status TEXT NOT NULL DEFAULT 'pending',        -- pending | added | dismissed
+    created_at REAL NOT NULL,
+    decided_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_requests_to ON song_requests(to_guest_id, status);
+
 CREATE TABLE IF NOT EXISTS quota_ledger (
     day TEXT PRIMARY KEY,
     units_used INTEGER NOT NULL DEFAULT 0,

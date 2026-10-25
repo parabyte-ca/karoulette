@@ -73,6 +73,8 @@ class AlertsMixin:
             return to_guest("superset", "★ Your Superset turn!", f"Pick a song that fits {d.get('theme', 'the theme')}.")
         if kind == "duet_invite":
             return to_guest("duet", "🎶 Duet!", f"{d.get('name', 'Someone')} added you to a duet: {song}")
+        if kind == "song_request":
+            return to_guest("duet", "🎁 Song suggestion", f"{d.get('name', 'Someone')} suggests you sing {song}. Add it or pass.")
         if kind == "song_error":
             return to_guest("duet", "Your song couldn't play", f"{song} couldn't play. Pick another and it plays straight away.")
         if kind == "superset_vote" and d.get("status") == "open" and d.get("name"):

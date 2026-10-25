@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.15.0] - 2026-10-25
+### Added
+- **❤️ Likes**: guests tap the heart on anyone else's song, waiting or singing, on their phone's Queue tab. The count shows on the TV's up-next list and on the singer's own phone. Likes are just love: they never move a song.
+- **Suggest a song for someone**: under the search box, "Sing it" now also offers **🎁 Suggest it to …**. The suggestion lands on their phone ("Suggested for you") to add with one tap or pass on. The suggester hears when it's added. It counts as a duet-type alert for push (now "Duets, suggestions and song issues"). Up to 3 suggestions from one guest can wait on another.
+- **Awards** (Song history in Host admin, and `/history`):
+  - **All-time records**: most songs ever, most cheers ever, most songs in one night, most-sung song, and the crowd favourite of the year;
+  - **Regulars** and **Perfect attendance** (sang at every night, once there have been 3);
+  - **Streaks** (3 nights in a row or more);
+  - **Newest voices**.
+  - Singers count the way the Song history counts them: singer code first, then name, with your merges on top.
+- **Recap additions**: **❤️ Most loved** (the song with the most likes), **🎉 First night!** for first-timers, and **🏅 Milestones** (5th, 10th, 25th… night, or 3+ nights in a row).
+- **🏅 Your personal bests** on phones with a singer code: nights, songs, most songs in a night, most-cheered song, go-to song, longest streak and first night, with a line for anything beaten tonight.
+
+### Changed
+- The TV recap gives the playlist QR a narrow column, so the highlights fit in two columns.
+
 ## [0.14.0] - 2026-10-25
 ### Added
 - **Push alerts**: alerts now reach a phone even when Karoulette is closed or the screen is locked. Guests tap **🔔 Buzz me when I'm nearly up**, tick what they'd like, then allow notifications:

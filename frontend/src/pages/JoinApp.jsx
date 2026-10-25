@@ -12,6 +12,7 @@ import { Toasts, useToasts } from "../components/Toasts";
 import { formatWait, secondsUntil, singers, sings } from "../lib/eta";
 import { notify, useInstall } from "../lib/pwa";
 import { AlertsOffer, AlertsSettings, useAlerts } from "../components/Alerts";
+import { LikeButton, MyBests, Suggestions } from "../components/Crowd";
 import { ClaimSheet, PastSongs, SingerFooter, SingerWelcome, rememberSinger } from "../components/SingerCode";
 
 function JoinForm({ initialCode, onJoined }) {
@@ -135,7 +136,11 @@ function IdeaChips({ ideas, onPick }) {
 
 function SearchPanel({ canAdd, limitNote, onAdd, push, setPick, partners, suggest, panelRef }) {
   const [q, setQ] = useState("");
-  const [duet, setDuet] = useState("");
+  const [forWho, setForWho] = useState(""); // "", "duet:<id>" or "suggest:<id>"
+  const [mode, whoId] = forWho ? forWho.split(":") : ["", null];
+  const suggestTo = mode === "suggest" ? partners.find((g) => g.id === Number(whoId)) : null;
+  const partnerGone = !!mode && !partners.some((g) => g.id === Number(whoId));
+  useEffect(() => { if (partnerGone) setForWho(""); }, [partnerGone]); // they left: back to solo
   const [results, setResults] = useState(null);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(null);
@@ -167,11 +172,18 @@ function SearchPanel({ canAdd, limitNote, onAdd, push, setPick, partners, sugges
 
   const add = async (r) => {
     setAdding(r.video_id);
+    if (partnerGone) return;
     try {
-      await onAdd(r, duet ? Number(duet) : null);
+      if (suggestTo) {
+        await api("/api/guest/suggest", { method: "POST", guest: true,
+          body: { to_guest_id: suggestTo.id, video_id: r.video_id, title: r.title, channel: r.channel } });
+        push(`🎁 Suggested to ${suggestTo.name}. It's on their phone now.`, "success");
+      } else {
+        await onAdd(r, mode === "duet" ? Number(whoId) : null);
+      }
       setResults(null);
       setQ("");
-      setDuet("");
+      setForWho("");
     } catch (err) {
       push(err.message, "error");
     } finally {
@@ -192,9 +204,14 @@ function SearchPanel({ canAdd, limitNote, onAdd, push, setPick, partners, sugges
       {partners.length > 0 && (
         <label className="duet-pick">
           <span>Sing it</span>
-          <select value={duet} onChange={(e) => setDuet(e.target.value)}>
+          <select value={forWho} onChange={(e) => setForWho(e.target.value)}>
             <option value="">Solo</option>
-            {partners.map((g) => <option key={g.id} value={g.id}>As a duet with {g.name}</option>)}
+            <optgroup label="Duet">
+              {partners.map((g) => <option key={g.id} value={`duet:${g.id}`}>As a duet with {g.name}</option>)}
+            </optgroup>
+            <optgroup label="Or suggest it to someone">
+              {partners.map((g) => <option key={g.id} value={`suggest:${g.id}`}>🎁 Suggest it to {g.name}</option>)}
+            </optgroup>
           </select>
         </label>
       )}
@@ -212,9 +229,9 @@ function SearchPanel({ canAdd, limitNote, onAdd, push, setPick, partners, sugges
                 {r.already && <div className="r-already">Already sung or queued tonight</div>}
               </div>
               <button className={`btn ${setPick ? "btn-gold" : "btn-primary"}`}
-                      disabled={(!canAdd && !setPick) || adding === r.video_id || (r.already && r.blocked)}
+                      disabled={(!canAdd && !setPick && !suggestTo) || adding === r.video_id || (r.already && r.blocked)}
                       onClick={() => add(r)}>
-                {adding === r.video_id ? "…" : r.already && r.blocked ? "Taken" : setPick ? "★ Add" : "Add"}
+                {adding === r.video_id ? "…" : r.already && r.blocked ? "Taken" : suggestTo ? "🎁 Suggest" : setPick ? "★ Add" : "Add"}
               </button>
             </li>
           ))}
@@ -284,6 +301,7 @@ function GuestHome({ me, onLeave }) {
   const [spinMeta, setSpinMeta] = useState({ candidates: [] });
   const [themes, setThemes] = useState([]);
   const [pushPrefs, setPushPrefs] = useAlerts();
+  const [suggestBump, setSuggestBump] = useState(0);
   const { canInstall, install, iosHint } = useInstall();
   const prevIdx = useRef(null);
   const [choosing, setChoosing] = useState(false);
@@ -313,6 +331,10 @@ function GuestHome({ me, onLeave }) {
         push("You're up next on the mic. Get ready!", "info", 8000);
         navigator.vibrate?.([300, 150, 300]);
         notify("You're up next!", `Head to the mic: ${decodeEntities(d.title)} is next.`);
+        break;
+      case "song_request":
+        push(`🎁 ${d.name} suggests you sing “${decodeEntities(d.title)}”. It's in your songs to add or pass.`, "success", 9000);
+        setSuggestBump((n) => n + 1);
         break;
       case "duet_invite": push(`🎶 ${d.name} added you to a duet: “${decodeEntities(d.title)}”`, "success", 9000); break;
       case "session_replaced":
@@ -520,6 +542,9 @@ function GuestHome({ me, onLeave }) {
             </>
           )}
 
+          {ev.status !== "ended" && <Suggestions bump={suggestBump} canAdd={!atCap && !pastLastCall} push={push} />}
+          {singer && <MyBests refresh={`${ev.status}-${state.recent.length}`} />}
+
           {ev.status !== "ended" && singer && <PastSongs onAdd={(s) => addSong(s, null)} canAdd={!atCap && !pastLastCall} push={push} />}
 
           {ev.status !== "ended" && <SearchPanel canAdd={!atCap && !pastLastCall} onAdd={addSong} push={push}
@@ -541,7 +566,7 @@ function GuestHome({ me, onLeave }) {
                       <div className="r-text">
                         <div className="r-title">{decodeEntities(i.title)}</div>
                         <div className="r-meta">{pos === 0 ? "Up next" : `#${pos + 1} in the queue`}{i.round ? ` · round ${i.round}` : ""}
-                          {` · ${wait(pos)}`}{i.duet_name ? ` · duet with ${i.duet_name}` : ""}</div>
+                          {` · ${wait(pos)}`}{i.duet_name ? ` · duet with ${i.duet_name}` : ""}{i.likes ? ` · ❤️ ${i.likes}` : ""}</div>
                         {pos === 0 && state.queue.length > 1 && (
                           <button className="btn btn-block pass-btn" onClick={() =>
                             window.confirm("Let the next singer go first? Your song plays right after theirs.") &&
@@ -596,6 +621,7 @@ function GuestHome({ me, onLeave }) {
             <div className="now-mini">
               <div className="label">Now singing</div>
               <strong>{singers(state.now_playing)}</strong> · {decodeEntities(state.now_playing.title)}
+              {!sings(state.now_playing, myId) && <LikeButton item={state.now_playing} myId={myId} push={push} />}
             </div>
           )}
           {sup && (
@@ -615,6 +641,8 @@ function GuestHome({ me, onLeave }) {
                   <div className="r-meta">{singers(i)}{i.duration_s ? ` · ${formatDuration(i.duration_s)}` : ""}
                     {i.flags > 0 ? ` · ⚑ ${i.flags}` : ""}</div>
                 </div>
+                {sings(i, myId) ? (i.likes > 0 && <span className="like-count" title="Likes">❤️ {i.likes}</span>)
+                  : <LikeButton item={i} myId={myId} push={push} />}
                 {i.is_superset && i.guest_id !== myId && (
                   <button className="btn" title="Flag as off-theme" onClick={() => flag(i.id)}>⚑</button>
                 )}

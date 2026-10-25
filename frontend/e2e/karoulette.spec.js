@@ -603,7 +603,7 @@ test("push alerts: pick kinds, turn on, follow the phone to a new event, the ser
 
   await page.locator(".alerts-settings summary").click();
   const changed = page.waitForResponse((r) => r.url().endsWith("/api/guest/push/prefs"));
-  await page.locator(".alerts-settings").getByLabel(/Duet invites/).uncheck();
+  await page.locator(".alerts-settings").getByLabel(/Duets, suggestions/).uncheck();
   expect((await (await changed).json()).prefs.duet).toBe(false);
 
   // The same phone at the next event: its alerts move to the new guest by themselves.
@@ -635,4 +635,51 @@ test("push alerts: pick kinds, turn on, follow the phone to a new event, the ser
   await page.getByRole("button", { name: "Turn alerts off" }).click();
   await expect(page.getByRole("button", { name: "🔔 Buzz me when I'm nearly up" })).toBeVisible();
   await hostCtx.close();
+});
+
+test("likes on the queue and TV, a suggested song, then the recap and awards", async ({ browser }) => {
+  const { ctx, ev, api } = await hostWithEvent(browser, "Love Night", { ready_seconds: 0 });
+  const tv = await openTv(ctx, ev);
+  const lou = await joinPhone(browser, ev, "Lou");
+  const mo = await joinPhone(browser, ev, "Mo");
+  await queue(lou, "Dolly Parton - Jolene (Karaoke)");
+
+  // Mo likes Lou's song: the count shows on the TV and on Lou's phone, and nothing moves.
+  await mo.getByRole("button", { name: /^Queue/ }).click();
+  await mo.getByRole("button", { name: /Like Dolly Parton - Jolene/ }).click();
+  await expect(mo.locator(".like-btn.liked")).toHaveText("❤️ 1");
+  await expect(tv.locator(".queue-item .like-badge")).toHaveText("❤️ 1");
+  await expect(lou.locator(".mine-song .r-meta")).toContainText("❤️ 1");
+
+  // Lou suggests a song to Mo from search results (search is stubbed: tests have no YouTube).
+  await lou.route(/\/api\/guest\/search/, (route) => route.fulfill({ json: { query: "abba karaoke", source: "api", results: [
+    { video_id: nextVideo(), title: "ABBA - Waterloo (Karaoke Version)", channel: "Sing King", duration_s: 170, thumbnail: "", embeddable: true },
+  ] } }));
+  await lou.getByPlaceholder("Song or artist").fill("abba");
+  await lou.getByRole("button", { name: "Search", exact: true }).click();
+  await lou.locator(".duet-pick select").selectOption({ label: "🎁 Suggest it to Mo" });
+  await lou.getByRole("button", { name: "🎁 Suggest" }).click();
+  await expect(lou.locator(".toast", { hasText: "Suggested to Mo" })).toBeVisible();
+  await mo.getByRole("button", { name: /^My songs/ }).click();
+  await expect(mo.locator(".toast", { hasText: "Lou suggests you sing" })).toBeVisible();
+  await mo.locator(".suggestions").getByRole("button", { name: "Add" }).click();
+  await expect(mo.locator(".suggestions")).toHaveCount(0);
+  await expect(mo.locator(".mine-song")).toContainText("Waterloo");
+  await expect(lou.locator(".toast", { hasText: "Mo added your suggestion" })).toBeVisible();
+
+  // The night ends: the recap names the most-loved song and the first-nighters; awards and bests follow.
+  await api.post(`/api/host/events/${ev.id}/actions/start`);
+  await finishSong(api, ev);
+  await finishSong(api, ev);
+  await api.post(`/api/host/events/${ev.id}/actions/end`);
+  await expect(tv.locator(".recap-highlights")).toContainText("❤️ Most loved");
+  await expect(tv.locator(".recap-highlights")).toContainText("Lou · Dolly Parton - Jolene (Karaoke) (1 like)");
+  await expect(tv.locator(".recap-highlights")).toContainText(/First night!.*Lou, Mo/);
+  await expect(mo.locator(".my-bests")).toContainText("First night! 🎉");
+
+  const guest = await (await phoneContext(browser)).newPage();
+  await guest.goto("/history");
+  await expect(guest.locator(".awards")).toContainText("All-time records");
+  await expect(guest.locator(".awards")).toContainText("Newest voices");
+  await expect(guest.locator(".award-card", { hasText: "Newest voices" })).toContainText("Lou");
 });
