@@ -1,8 +1,8 @@
 # Security checks: secrets (full history), dependency CVEs, static analysis, image and config scanning, SBOM.
 # Runs on every push to main, every PR, and weekly so new CVEs surface even when nothing changes.
 # Scanner images are pinned by digest. Trivy's own releases were compromised in March 2026 (v0.69.4-v0.69.6);
-# 0.75.0 postdates the clean-up. Dependabot (github-actions) keeps the actions current; pin them to SHAs with
-# `pinact run` when convenient.
+# 0.75.0 postdates the clean-up. Actions are pinned to commit SHAs (version in the comment); Dependabot
+# (github-actions, with a 7-day cooldown) proposes updates.
 name: Security
 
 on:
@@ -29,7 +29,7 @@ jobs:
     name: gitleaks (full history)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -42,17 +42,17 @@ jobs:
     name: Dependency CVEs (pip-audit, npm audit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.13"
       - name: pip-audit
         run: |
           python -m pip install --quiet pip-audit==2.10.1
           pip-audit -r backend/requirements.txt --strict --progress-spinner off
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22"
       - name: npm audit (high and critical fail the build)
@@ -71,14 +71,14 @@ jobs:
       matrix:
         language: [python, javascript-typescript, actions]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           category: /language:${{ matrix.language }}
 
@@ -86,10 +86,10 @@ jobs:
     name: Semgrep (OWASP, Python, JS, Docker, Actions)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.13"
       - name: Semgrep scan
@@ -107,7 +107,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
       - name: Build the image locally (not pushed)
@@ -128,17 +128,17 @@ jobs:
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/out" "$TRIVY_IMAGE" \
             image --quiet --format cyclonedx --output /out/sbom.cdx.json karoulette:scan
-      - uses: github/codeql-action/upload-sarif@v4
+      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         if: always()
         with:
           sarif_file: trivy-image.sarif
           category: trivy-image
-      - uses: github/codeql-action/upload-sarif@v4
+      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         if: always()
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()
         with:
           name: sbom
