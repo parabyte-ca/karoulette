@@ -7,10 +7,13 @@ import html
 import csv
 import io
 import logging
+import os
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 import segno
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
@@ -33,6 +36,44 @@ from .youtube import SearchUnavailable, YouTubeService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("karoulette")
+
+
+class _RedactTokens(logging.Filter):
+    """Keep guest tokens (WebSocket ?token=...) out of the access log."""
+    _pattern = re.compile(r"(token=)[^&\s\"]+")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.args:
+            record.args = tuple(self._pattern.sub(r"\1[redacted]", a) if isinstance(a, str) else a
+                                for a in record.args)
+        return True
+
+
+for _name in ("uvicorn.access", "uvicorn.error"):
+    logging.getLogger(_name).addFilter(_RedactTokens())
+
+# Web Push services phones subscribe through. Subscriptions anywhere else are refused, so a guest can't make
+# the server send requests into the local network.
+PUSH_HOSTS = ("fcm.googleapis.com", "android.googleapis.com", "updates.push.services.mozilla.com",
+              "push.services.mozilla.com", "web.push.apple.com", "notify.windows.com")
+
+
+def push_endpoint_allowed(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme == "https" and parsed.port in (None, 443) and \
+        any(host == h or host.endswith("." + h) for h in PUSH_HOSTS)
+
+
+# Report-only by default so a missed source shows in the browser console instead of breaking the TV.
+# Set CSP_MODE=enforce once the console is clean, or off to drop the header.
+CSP = ("default-src 'self'; script-src 'self' https://www.youtube.com https://s.ytimg.com; "
+       "frame-src https://www.youtube.com https://www.youtube-nocookie.com; "
+       "img-src 'self' data: blob: https://i.ytimg.com https://*.ytimg.com; "
+       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; "
+       "connect-src 'self' https://api.spotify.com https://accounts.spotify.com; "
+       "manifest-src 'self'; worker-src 'self'; media-src 'self'; object-src 'none'; base-uri 'self'; "
+       "frame-ancestors 'self'; form-action 'self'")
 
 
 # --------------------------------------------------------------------------- request models
@@ -222,6 +263,8 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         "search_guest": RateLimiter(10, 60), "search_ip": RateLimiter(60, 60),
         "join": RateLimiter(15, 60), "login": RateLimiter(8, 60), "queue": RateLimiter(10, 60),
         "react": RateLimiter(20, 10), "originals": RateLimiter(60, 60), "like": RateLimiter(30, 10),
+        # Wrong PINs from everyone together: a brute force from many addresses still stops here.
+        "login_fail": RateLimiter(20, 900),
     }
 
     pending_state: dict[int, asyncio.Task] = {}
@@ -289,6 +332,8 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         task = asyncio.create_task(ticker()) if start_ticker else None
         log.info("Karoulette v%s ready. Data: %s. Search mode: %s", settings.version, settings.data_path,
                  yt.quota_status()["mode"])
+        log.info("Client addresses are taken from X-Forwarded-For only when sent by: %s",
+                 os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"))
         yield
         if task:
             task.cancel()
@@ -305,6 +350,9 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.engine, app.state.db, app.state.settings, app.state.hub = engine, db, settings, hub
     app.state.push = pusher
+    app.state.limits = limits
+
+    csp_mode = os.getenv("CSP_MODE", "report").strip().lower()
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -312,6 +360,13 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        resp.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+        if csp_mode == "enforce":
+            resp.headers.setdefault("Content-Security-Policy", CSP)
+        elif csp_mode == "report":
+            resp.headers.setdefault("Content-Security-Policy-Report-Only", CSP)
+        if request.headers.get("x-forwarded-proto", request.url.scheme) == "https":
+            resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
         if request.url.path.startswith("/api/"):
             resp.headers.setdefault("Cache-Control", "no-store")
         return resp
@@ -321,6 +376,12 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     def client_ip(request: Request) -> str:
         return request.client.host if request.client else "unknown"
 
+    def session_epoch() -> int:
+        return int(db.get_setting("session_epoch", 0) or 0)
+
+    def is_host(cookie: str | None) -> bool:
+        return auth.check_session(settings.secret_key, cookie, session_epoch())
+
     def limit(name: str, key: str) -> None:
         lim = limits[name]
         if not lim.allow(key):
@@ -328,7 +389,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
 
     # These are async so they run in the request's own task: the actor they set reaches the engine's timeline.
     async def require_host(request: Request) -> None:
-        if not auth.check_session(settings.secret_key, request.cookies.get(auth.COOKIE_NAME)):
+        if not is_host(request.cookies.get(auth.COOKIE_NAME)):
             raise HTTPException(401, "Host login required")
         ACTOR.set(("host", None, "Host"))
 
@@ -455,6 +516,8 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
 
     @app.post("/api/guest/push")
     async def guest_push(body: PushIn, guest: dict = Depends(current_guest)):
+        if not push_endpoint_allowed(body.endpoint):
+            raise HTTPException(422, "That isn't a push service this server sends to.")
         async with lock:
             prefs = engine.save_push(guest["id"], body.endpoint, body.keys.p256dh, body.keys.auth, body.prefs)
         return {"prefs": prefs}
@@ -628,11 +691,24 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
 
     @app.post("/api/host/login")
     async def host_login(body: PinIn, request: Request, response: Response):
-        limit("login", client_ip(request))
-        if not auth.verify_pin(body.pin.strip(), db.get_setting("host_pin_hash", "")):
+        ip = client_ip(request)
+        limit("login", ip)
+        fails = limits["login_fail"]
+        if fails.full("all"):
+            log.warning("Host login refused: too many wrong PINs recently (from %s)", ip)
+            raise HTTPException(429, f"Too many wrong PINs. Try again in {fails.retry_after('all') // 60 + 1} minutes.")
+        stored = db.get_setting("host_pin_hash", "")
+        # PBKDF2 takes a moment: run it off the event loop so the TV and phones don't stall.
+        if not await asyncio.to_thread(auth.verify_pin, body.pin.strip(), stored):
+            fails.allow("all")
+            log.warning("Host login failed from %s", ip)
             raise HTTPException(401, "That PIN didn't match.")
+        if auth.needs_rehash(stored) and not db.get_setting("host_pin_from_env"):
+            db.set_setting("host_pin_hash", await asyncio.to_thread(auth.hash_pin, body.pin.strip()))
+        log.info("Host signed in from %s", ip)
         secure = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
-        response.set_cookie(auth.COOKIE_NAME, auth.make_session(settings.secret_key), max_age=auth.SESSION_SECONDS,
+        response.set_cookie(auth.COOKIE_NAME, auth.make_session(settings.secret_key, session_epoch()),
+                            max_age=auth.SESSION_SECONDS,
                             httponly=True, samesite="lax", secure=secure, path="/")
         return {"ok": True}
 
@@ -643,11 +719,11 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
 
     @app.get("/api/host/session")
     async def host_session(request: Request):
-        return {"authenticated": auth.check_session(settings.secret_key, request.cookies.get(auth.COOKIE_NAME)),
+        return {"authenticated": is_host(request.cookies.get(auth.COOKIE_NAME)),
                 "pin_from_env": bool(db.get_setting("host_pin_from_env")), "version": settings.version}
 
     @app.post("/api/host/pin", dependencies=[Depends(require_host)])
-    async def host_pin(body: PinChangeIn):
+    async def host_pin(body: PinChangeIn, request: Request):
         if db.get_setting("host_pin_from_env"):
             raise HTTPException(409, "The PIN is set by HOST_PIN in your .env file. Change it there.")
         if not auth.verify_pin(body.current.strip(), db.get_setting("host_pin_hash", "")):
@@ -656,7 +732,13 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
             db.set_setting("host_pin_hash", auth.hash_pin(auth.validate_pin(body.new)))
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-        return {"ok": True}
+        db.set_setting("session_epoch", session_epoch() + 1)  # sign out every other screen
+        log.info("Host PIN changed; all host sessions signed out")
+        response = JSONResponse({"ok": True})
+        response.set_cookie(auth.COOKIE_NAME, auth.make_session(settings.secret_key, session_epoch()),
+                            max_age=auth.SESSION_SECONDS, httponly=True, samesite="lax", path="/",
+                            secure=request.headers.get("x-forwarded-proto", request.url.scheme) == "https")
+        return response
 
     # ------------------------------------------------------------------ host: events
 
@@ -849,7 +931,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         """The original recording of each sung song, for a YouTube playlist: from one event (with its join
         code), from the song history (when it's shared), or anything for the host. Falls back to the
         karaoke video when the original can't be found."""
-        is_host = auth.check_session(settings.secret_key, request.cookies.get(auth.COOKIE_NAME))
+        is_host = auth.check_session(settings.secret_key, request.cookies.get(auth.COOKIE_NAME), session_epoch())
         if not body.code and not is_host and not engine.history_public():
             raise HTTPException(403, "The host hasn't shared the song history.")
         items = engine.playlist_items(body.item_ids, None if is_host and not body.code else body.code)
@@ -1028,7 +1110,12 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
                 await ws.close(code=4403)
                 return
             client = Client(ws, "guest", guest["id"])
-        elif auth.check_session(settings.secret_key, ws.cookies.get(auth.COOKIE_NAME)):
+        elif is_host(ws.cookies.get(auth.COOKIE_NAME)):
+            origin = ws.headers.get("origin")
+            allowed = {urlparse(settings.public_base_url).netloc, ws.headers.get("host")} - {None, ""}
+            if origin and urlparse(origin).netloc not in allowed:  # another site riding the host's cookie
+                await ws.close(code=4403)
+                return
             client = Client(ws, "host")
         else:
             await ws.close(code=4401)

@@ -12,8 +12,22 @@ services:
       DATA_PATH: /data
       # Shared with the host's upgrade helper (scripts/upgrade-agent.sh) for Host admin > Updates.
       UPGRADE_DIR: /upgrade
+      # Only these addresses may tell the app the real client IP (X-Forwarded-For). The default covers the
+      # host and Docker networks (Cloudflare Tunnel, Nginx Proxy Manager); LAN phones can't fake it.
+      FORWARDED_ALLOW_IPS: ${KQ_TRUSTED_PROXIES:-127.0.0.1,172.16.0.0/12}
     ports:
-      - "${KQ_PORT:-8095}:8000"
+      # KQ_BIND=127.0.0.1 when everyone reaches Karoulette through the proxy or tunnel on this host.
+      - "${KQ_BIND:-0.0.0.0}:${KQ_PORT:-8095}:8000"
     volumes:
       - ${KQ_DATA_DIR:-./data}:/data
       - ${KQ_UPGRADE_FOLDER:-./upgrade}:/upgrade
+    # Least privilege: nothing to escalate to, no Linux capabilities, an unwritable image.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 1g
+    pids_limit: 256

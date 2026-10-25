@@ -24,6 +24,14 @@ class RateLimiter:
                 del self.hits[k]
         return True
 
+    def full(self, key: str, now: float | None = None) -> bool:
+        """True when ``key`` is at its limit, without counting this call (for failure-only limits)."""
+        now = time.monotonic() if now is None else now
+        q = self.hits.get(key)
+        while q and now - q[0] > self.window:
+            q.popleft()
+        return bool(q) and len(q) >= self.limit
+
     def retry_after(self, key: str) -> int:
         q = self.hits.get(key)
         if not q:
