@@ -1,0 +1,8 @@
+# Changes to these paths need the owner's review once branch protection requires code owner review.
+*                       @parabyte-ca
+/.github/               @parabyte-ca
+/scripts/               @parabyte-ca
+/setup.sh               @parabyte-ca
+/update.sh              @parabyte-ca
+/Dockerfile             @parabyte-ca
+/docker-compose.yml     @parabyte-ca

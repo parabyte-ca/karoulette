@@ -21,7 +21,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# pip itself isn't needed at run time, and its vendored libraries carry CVEs of their own: remove it.
+RUN pip install --no-cache-dir -r requirements.txt \
+ && python -m pip uninstall -y pip
 
 COPY VERSION ./VERSION
 COPY backend/app ./app
