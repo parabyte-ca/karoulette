@@ -580,3 +580,24 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 .tl-who.tl-guest { color: var(--highlight); border-color: var(--highlight); }
 .timeline .tl-superset .tl-icon { color: var(--highlight); }
 @media (max-width: 600px) { .timeline li { grid-template-columns: 5.4em 1.4em 1fr; padding: 0.4em 0.5em; } }
+
+/* ---------- Singer codes */
+.welcome-back { margin: 0.2em 0 0.6em; }
+.singer-code-entry { margin: 0.2em 0 0.6em; }
+.singer-card { position: relative; border-color: var(--highlight); }
+.singer-card .close-x { position: absolute; top: 0.4em; right: 0.6em; }
+.claim-list { list-style: none; margin: 0.4em 0 0.8em; padding: 0; max-height: 22em; overflow-y: auto; }
+.claim-list li { border-top: 1px solid var(--line); }
+.claim-list .check { margin: 0.45em 0; align-items: flex-start; }
+.claim-note { display: block; color: var(--orange); font-size: 0.85em; font-weight: 700; }
+.claim-code { margin-top: 0.8em; }
+.past-songs summary { cursor: pointer; }
+.names-panel h4 { margin: 1em 0 0.3em; }
+.singer-list, .night-list { list-style: none; margin: 0.3em 0; padding: 0; }
+.singer-list > li { border-top: 1px solid var(--line); padding: 0.3em 0; }
+.singer-list summary { cursor: pointer; }
+.night-list li, .disputes li { display: flex; justify-content: space-between; align-items: center; gap: 0.6em; flex-wrap: wrap; padding: 0.3em 0; border-top: 1px dashed var(--line); }
+.night-list select { width: auto; max-width: 14em; }
+.disputes li { columns: auto; }
+.name-list.disputes { columns: 1; max-height: none; }
+.singer-code { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.12em; color: var(--highlight); }

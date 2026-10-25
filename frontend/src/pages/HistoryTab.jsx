@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import HistoryDashboard from "../components/History";
 import { resetPlaylistConfig } from "../lib/playlists";
+import SingersAdmin from "../components/SingersAdmin";
 
 /** Host admin: merge the names one singer has used across events. */
 function SingerNames({ names, onChange, push }) {
@@ -126,6 +127,7 @@ export default function HistoryTab({ push }) {
           link can see singers' names and songs)</span>
       </label>
       <SingerNames names={data.names} push={push} onChange={(names) => { setData({ ...data, names }); load(); }} />
+      <SingersAdmin push={push} onChanged={load} />
       <SpotifySetup spotify={data.spotify} push={push}
                     onSaved={(clientId) => setData({ ...data, spotify: { ...data.spotify, client_id: clientId } })} />
       <HistoryDashboard songs={data.songs} />

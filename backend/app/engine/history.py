@@ -28,21 +28,31 @@ class HistoryMixin:
         groups.update(self._aliases())
         return groups
 
+    @staticmethod
+    def _label(singer_name: str | None, display_name: str, groups: dict[str, str], aliases: dict[str, str]) -> str:
+        """Who a song counts for: the singer code's name if the night is claimed, else the name group; the
+        host's name merges apply on top of either."""
+        if singer_name:
+            return aliases.get(name_key(singer_name)) or singer_name
+        return groups[name_key(display_name)]
+
     def history(self) -> dict:
         rows = self.db.all(
             "SELECT q.id, q.event_id, q.title, q.channel, q.video_id, q.duration_s, q.status, q.is_superset, "
             "q.theme_name, q.cheers, q.played_at, q.added_at, COALESCE(r.number, q.round_no) AS round_number, "
             "e.name AS event_name, COALESCE(e.started_at, e.created_at) AS event_date, "
-            "g.display_name AS singer, d.display_name AS duet "
+            "g.display_name AS singer, d.display_name AS duet, gs.display_name AS singer_named, "
+            "ds.display_name AS duet_named "
             "FROM queue_items q JOIN events e ON e.id = q.event_id JOIN guests g ON g.id = q.guest_id "
             "LEFT JOIN guests d ON d.id = q.duet_guest_id LEFT JOIN rounds r ON r.id = q.round_id "
+            "LEFT JOIN singers gs ON gs.id = g.singer_id LEFT JOIN singers ds ON ds.id = d.singer_id "
             "WHERE q.status IN ('played', 'playing', 'skipped') "
             "ORDER BY COALESCE(q.played_at, q.added_at) DESC, q.id DESC")
-        groups = self._singer_groups()
+        groups, aliases = self._singer_groups(), self._aliases()
         songs = [{
             "id": r["id"], "event_id": r["event_id"], "event": r["event_name"], "event_date": r["event_date"],
-            "at": r["played_at"] or r["added_at"], "singer": r["singer"], "singer_group": groups[name_key(r["singer"])],
-            "duet": r["duet"], "duet_group": groups[name_key(r["duet"])] if r["duet"] else None,
+            "at": r["played_at"] or r["added_at"], "singer": r["singer"], "singer_group": self._label(r["singer_named"], r["singer"], groups, aliases),
+            "duet": r["duet"], "duet_group": self._label(r["duet_named"], r["duet"], groups, aliases) if r["duet"] else None,
             "title": r["title"], "song": logic.song_name(r["title"]), "track": logic.playlist_song(r["title"]),
             "channel": r["channel"],
             "video_id": r["video_id"], "duration_s": r["duration_s"], "status": STATUS_LABELS[r["status"]],

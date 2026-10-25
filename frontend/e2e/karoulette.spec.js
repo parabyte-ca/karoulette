@@ -508,7 +508,7 @@ test("timeline, archive and delete for good in Host admin", async ({ browser }) 
   await expect(timeline).toContainText("Rae added “Toto - Africa”, round 1");
   await expect(timeline).toContainText("Skipped “Toto - Africa” (Rae)");
   await admin.getByLabel("Who").selectOption("Rae");
-  await expect(timeline.locator("li")).toHaveCount(2);          // joined, added
+  await expect(timeline.locator("li")).toHaveCount(3);          // joined, got a singer code, added
 
   await admin.getByRole("button", { name: "🗄 Archive" }).click();
   await expect(admin.locator(".toast")).toContainText("Archived");
@@ -523,4 +523,47 @@ test("timeline, archive and delete for good in Host admin", async ({ browser }) 
   admin.once("dialog", (d) => d.accept("Timeline Night"));
   await admin.getByRole("button", { name: "Delete for good" }).click();
   await expect.poll(async () => (await (await api.get("/api/host/events")).json()).some((e) => e.id === ev.id)).toBe(false);
+});
+
+test("returning singers: code saved on the phone, past songs, claiming and host disputes", async ({ browser }) => {
+  const first = await hostWithEvent(browser, "Code Night One", { ready_seconds: 0 });
+  const phoneCtx = await phoneContext(browser);
+  const phone = await phoneCtx.newPage();
+  await phone.goto(`/join/${first.ev.join_code}`);
+  await phone.getByPlaceholder("What should the TV call you?").fill("Zed");
+  await phone.getByRole("button", { name: "Join the rotation" }).click();
+  await expect(phone.locator(".singer-card")).toContainText("Your singer code:");
+  const code = (await phone.locator(".singer-card .singer-code").textContent()).trim();
+  await queue(phone, "Toto - Africa (Karaoke Version)");
+  await first.api.post(`/api/host/events/${first.ev.id}/actions/start`);
+  await finishSong(first.api, first.ev);
+  await first.api.post(`/api/host/events/${first.ev.id}/actions/end`);
+
+  // Next event, same phone: it knows the singer and offers their past songs.
+  const second = await hostWithEvent(browser, "Code Night Two", { ready_seconds: 0 });
+  await phone.goto(`/join/${second.ev.join_code}`);
+  await expect(phone.locator(".welcome-back")).toContainText(`Welcome back, Zed! Singer code ${code}`);
+  await expect(phone.getByPlaceholder("What should the TV call you?")).toHaveValue("Zed");
+  await phone.getByPlaceholder("What should the TV call you?").fill("Zed P");
+  await phone.getByRole("button", { name: "Join the rotation" }).click();
+  await expect(phone.locator(".phone-footer")).toContainText(`Your singer code: ${code}`);
+  await expect(phone.locator(".phone-footer")).toContainText("2 nights so far");
+  await phone.locator(".past-songs summary").click();
+  await expect(phone.locator(".past-songs")).toContainText("Toto - Africa");
+
+  // Someone else claims "Zed" by name: it's already Zed P's, so the host decides.
+  const other = await joinPhone(browser, second.ev, "Bob");
+  await other.getByRole("button", { name: "Claim my past nights" }).click();
+  await other.locator(".claim-list li").filter({ has: other.locator("strong", { hasText: /^Zed$/ }) }).getByRole("checkbox").check();
+  await other.getByRole("button", { name: /Claim 1 name/ }).click();
+  await expect(other.locator(".toast", { hasText: "the host will decide" })).toBeVisible();
+
+  const admin = await second.ctx.newPage();
+  await admin.goto("/host/admin");
+  await admin.getByRole("button", { name: "Song history" }).click();
+  const panel = admin.locator(".names-panel", { hasText: "Singers and codes" });
+  await expect(panel.locator(".disputes")).toContainText("Bob");
+  await panel.getByRole("button", { name: "Keep" }).click();
+  await expect(admin.locator(".toast", { hasText: "Kept with Zed P" })).toBeVisible();
+  await expect(admin.locator(".history-table")).toContainText("(as Zed)");
 });
