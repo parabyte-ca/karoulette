@@ -12,6 +12,7 @@ from __future__ import annotations
 from .constants import (ACTIVE_QUEUE_STATUSES, COLOUR_SCHEMES, DEFAULT_SCHEME, JOIN_CODE_ALPHABET, REACTIONS,
                         SEED_THEMES, UNKNOWN_DURATION_S, VIDEO_COMMANDS, EngineError, hash_token)
 from .core import EngineBase
+from .alerts import AlertsMixin
 from .events import EventsMixin
 from .guests import GuestsMixin
 from .history import HistoryMixin
@@ -25,7 +26,7 @@ from .views import ViewsMixin
 
 
 class Engine(EventsMixin, GuestsMixin, ThemesMixin, SupersetsMixin, QueueMixin, PlaybackMixin, LastCallMixin,
-             HistoryMixin, SingersMixin, ViewsMixin, EngineBase):
+             HistoryMixin, SingersMixin, AlertsMixin, ViewsMixin, EngineBase):
     """Everything an event can do. See each mixin's module for its part."""
 
 

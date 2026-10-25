@@ -53,6 +53,7 @@ class Settings:
     update_check: bool = field(default_factory=lambda: os.getenv("UPDATE_CHECK", "true").lower() != "false")
     upgrade_dir: str = field(default_factory=lambda: os.getenv("UPGRADE_DIR", "").strip())
     enable_ytdlp: bool = field(default_factory=lambda: os.getenv("ENABLE_YTDLP", "true").lower() != "false")
+    vapid_subject: str = field(default_factory=lambda: os.getenv("VAPID_SUBJECT", "").strip())
     spotify_client_id: str = field(default_factory=lambda: os.getenv("SPOTIFY_CLIENT_ID", "").strip())
     state_coalesce_s: float = field(default_factory=lambda: float(os.getenv("STATE_COALESCE_MS", "60")) / 1000)
     version: str = field(default_factory=_read_version)

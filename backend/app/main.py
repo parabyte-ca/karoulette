@@ -25,6 +25,7 @@ from .config import Settings
 from .db import Database
 from .engine import REACTIONS, Engine, EngineError
 from .engine.core import ACTOR
+from .push import PushService
 from .ratelimit import RateLimiter
 from .updates import UpdateError, UpdateService
 from .ws import Client, Hub
@@ -146,6 +147,26 @@ class UpgradeIn(BaseModel):
     version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
 
 
+class PushKeysIn(BaseModel):
+    p256dh: str = Field(min_length=20, max_length=200)
+    auth: str = Field(min_length=8, max_length=100)
+
+
+class PushIn(BaseModel):
+    endpoint: str = Field(pattern=r"^https://", max_length=1000)
+    keys: PushKeysIn
+    prefs: dict[str, bool] = Field(default_factory=dict)
+
+
+class PushPrefsIn(BaseModel):
+    endpoint: str = Field(max_length=1000)
+    prefs: dict[str, bool]
+
+
+class PushEndpointIn(BaseModel):
+    endpoint: str = Field(max_length=1000)
+
+
 class PlayerIn(BaseModel):
     item_id: int
     state: str = Field(pattern=r"^(ended|error)$")
@@ -170,7 +191,8 @@ STATIC_FILES: dict[str, str | None] = {  # files served from the site root, with
 # --------------------------------------------------------------------------- app factory
 
 def create_app(settings: Settings | None = None, start_ticker: bool = True,
-               youtube: YouTubeService | None = None, updates: UpdateService | None = None) -> FastAPI:
+               youtube: YouTubeService | None = None, updates: UpdateService | None = None,
+               push: PushService | None = None) -> FastAPI:
     settings = settings or Settings()
     settings.ensure()
     db = Database(settings.db_path)
@@ -183,6 +205,9 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     backups = Backups(db, settings.data_path, settings.version)
     banners = BannerStore(db, settings.data_path)
     banners.migrate()
+    site = settings.public_base_url if settings.public_base_url.startswith("https://") else ""
+    pusher = push or PushService(db, settings.vapid_subject or site)
+    push_tasks: set[asyncio.Task] = set()
     started_at = time.time()
     hub = Hub()
     lock = asyncio.Lock()
@@ -200,6 +225,15 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         event_ids = {m["event_id"] for m in messages} | set(extra_events)
         for m in messages:
             await hub.send(m["event_id"], m["message"], m["guest_id"])
+        try:
+            jobs = engine.push_jobs(messages)
+        except Exception:  # an alert must never break the queue
+            log.exception("Push alerts failed")
+            jobs = []
+        for sub, payload in jobs:
+            task = asyncio.create_task(pusher.send(sub, payload))
+            push_tasks.add(task)
+            task.add_done_callback(push_tasks.discard)
         for eid in event_ids:
             if hub.count(eid) and eid not in pending_state:
                 pending_state[eid] = asyncio.create_task(send_state(eid))
@@ -253,13 +287,17 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
             task.cancel()
         for pending in list(pending_state.values()):
             pending.cancel()
+        for pending in list(push_tasks):
+            pending.cancel()
         await yt.aclose()
         await upd.aclose()
+        await pusher.aclose()
         db.close()
 
     app = FastAPI(title="Karoulette", version=settings.version, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.engine, app.state.db, app.state.settings, app.state.hub = engine, db, settings, hub
+    app.state.push = pusher
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -401,6 +439,32 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         except EngineError as exc:
             raise HTTPException(exc.status, exc.message) from exc
         return {"name": singer["display_name"], "code": singer["code"]}
+
+    # ------------------------------------------------------------------ push alerts
+
+    @app.get("/api/public/push-key")
+    async def push_key():
+        return {"key": pusher.public_key}
+
+    @app.post("/api/guest/push")
+    async def guest_push(body: PushIn, guest: dict = Depends(current_guest)):
+        async with lock:
+            prefs = engine.save_push(guest["id"], body.endpoint, body.keys.p256dh, body.keys.auth, body.prefs)
+        return {"prefs": prefs}
+
+    @app.put("/api/guest/push/prefs")
+    async def guest_push_prefs(body: PushPrefsIn, guest: dict = Depends(current_guest)):
+        async with lock:
+            prefs = engine.set_push_prefs(guest["id"], body.endpoint, body.prefs)
+        if not prefs:
+            raise HTTPException(404, "Alerts aren't on for this phone. Turn them on again.")
+        return {"prefs": prefs}
+
+    @app.post("/api/guest/push/off")
+    async def guest_push_off(body: PushEndpointIn, guest: dict = Depends(current_guest)):
+        async with lock:
+            engine.delete_push(guest["id"], body.endpoint)
+        return {"ok": True}
 
     @app.post("/api/guest/singer-code")
     async def guest_singer_code(body: SingerCodeIn, request: Request, guest: dict = Depends(current_guest)):
@@ -812,6 +876,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         engine.seed_themes()
         engine.upgrade_event_configs()
         auth.init_pin(db, settings.host_pin)  # a PIN set in .env still works after restoring
+        pusher.load_key()  # phones restored with the backup subscribed with its key
         await broadcast([], set(hub.rooms))
         log.info("Restored %s (saved the previous database as %s)", result["restored"], result["safety_backup"])
         return result

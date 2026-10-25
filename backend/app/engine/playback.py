@@ -95,6 +95,12 @@ class PlaybackMixin:
         if upcoming:
             for gid in filter(None, (upcoming["guest_id"], upcoming["duet_guest_id"])):
                 self.emit(event_id, "you_are_next", {"title": upcoming["title"]}, guest_id=gid)
+        queue = [] if self._active_set(event_id) else self._queue(event_id)
+        if len(queue) > 1:  # a heads-up for whoever sings after the next song (push alerts use it)
+            busy = {guest["id"], item["duet_guest_id"]} | ({upcoming["guest_id"], upcoming["duet_guest_id"]} if upcoming else set())
+            for gid in filter(None, (queue[1]["guest_id"], queue[1]["duet_guest_id"])):
+                if gid not in busy:  # already told they're singing or up next
+                    self.emit(event_id, "two_to_go", {"title": queue[1]["title"]}, guest_id=gid)
         return item
 
     def pause_queue(self, event_id: int) -> None:

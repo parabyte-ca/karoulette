@@ -208,7 +208,8 @@ class SupersetsMixin:
                 if playing else "after this song")
         self.notice(ev["id"], f"★ {guest['display_name']} calls a SUPERSET, {what}! Vote on your phone.", "gold")
         self.log(ev["id"], "superset", f"{guest['display_name']} called a Superset vote, {what}", guest_id=guest_id)
-        self.emit(ev["id"], "superset_vote", {"status": "open", "name": guest["display_name"], "mode": mode})
+        self.emit(ev["id"], "superset_vote", {"status": "open", "name": guest["display_name"], "mode": mode,
+                                              "guest_id": guest_id})
         return self.db.one("SELECT * FROM superset_votes WHERE id = ?", (vote_id,))
 
     def vote_superset(self, guest_id: int, yes: bool) -> None:
