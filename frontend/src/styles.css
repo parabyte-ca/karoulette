@@ -566,3 +566,5 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 .recap-playlist span { color: var(--text); font-weight: 700; }
 .setup-steps { padding-left: 1.4em; display: flex; flex-direction: column; gap: 0.4em; }
 .setup-steps code { word-break: break-all; background: var(--input); padding: 0.05em 0.35em; border-radius: 4px; }
+.result.already img, .result.already .r-title { opacity: 0.55; }
+.r-already { color: var(--orange); font-weight: 700; font-size: 0.85em; }

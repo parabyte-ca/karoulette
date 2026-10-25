@@ -171,15 +171,17 @@ function SearchPanel({ canAdd, limitNote, onAdd, push, setPick, partners, sugges
       {results && (
         <ul className="results">
           {results.map((r) => (
-            <li key={r.video_id} className="result">
+            <li key={r.video_id} className={`result ${r.already ? "already" : ""}`}>
               <img src={r.thumbnail || `https://i.ytimg.com/vi/${r.video_id}/mqdefault.jpg`} alt="" loading="lazy" />
               <div className="r-text">
                 <div className="r-title">{decodeEntities(r.title)}</div>
                 <div className="r-meta">{decodeEntities(r.channel)}{r.duration_s ? ` · ${formatDuration(r.duration_s)}` : ""}</div>
+                {r.already && <div className="r-already">Already sung or queued tonight</div>}
               </div>
-              <button className={`btn ${setPick ? "btn-gold" : "btn-primary"}`} disabled={(!canAdd && !setPick) || adding === r.video_id}
+              <button className={`btn ${setPick ? "btn-gold" : "btn-primary"}`}
+                      disabled={(!canAdd && !setPick) || adding === r.video_id || (r.already && r.blocked)}
                       onClick={() => add(r)}>
-                {adding === r.video_id ? "…" : setPick ? "★ Add" : "Add"}
+                {adding === r.video_id ? "…" : r.already && r.blocked ? "Taken" : setPick ? "★ Add" : "Add"}
               </button>
             </li>
           ))}

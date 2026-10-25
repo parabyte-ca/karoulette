@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.2] - 2026-10-25
+### Fixed
+- **Stronger duplicate detection.** It used to catch only the exact same YouTube video, so the same song from another karaoke channel got through (e.g. "Stuck With You" from Reekies and from Party Tyme in one Superset). Songs now match by artist and title whatever the channel or wording: capitals, accents, punctuation, "&"/"and"/commas, "The", "ft. ...", "(Karaoke Version)", "In the Style of ..." and artist/title order are all ignored.
+  - Applies to the regular queue and Superset picks, against songs played, playing or waiting. Skipped songs and songs that couldn't play don't count, so a bad video can be picked again.
+  - Phones mark search results already sung or queued tonight ("Taken"), and the refusal says who picked it.
+
 ## [0.11.1] - 2026-10-24
 ### Fixed
 - Song history: long Superset themes squeezed into a stretched pill. Superset songs now get a short "★ Superset" badge with the theme as a note underneath (two lines at most; the full theme shows on hover).

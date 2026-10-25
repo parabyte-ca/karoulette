@@ -120,3 +120,16 @@ def test_colour_scheme_setting(client):
         while msg["type"] != "state":
             msg = ws.receive_json()
         assert msg["data"]["appearance"]["scheme"] == "velvet"
+
+
+def test_search_marks_songs_already_queued(client):
+    login(client)
+    ev = client.post("/api/host/events", json={"name": "Dup Night"}).json()
+    token = client.post("/api/guest/join", json={"code": ev["join_code"], "name": "Alex"}).json()["token"]
+    auth = {"Authorization": f"Bearer {token}"}
+    assert client.get("/api/guest/search?q=test", headers=auth).json()["results"][0]["already"] is False
+    client.post("/api/guest/queue", headers=auth, json={"video_id": "zyxwvutsrqp"})   # "Test Song" again
+    hit = client.get("/api/guest/search?q=test", headers=auth).json()["results"][0]
+    assert hit["already"] is True and hit["blocked"] is True                            # other channel, same song
+    refused = client.post("/api/guest/queue", headers=auth, json={"video_id": "abcdefghijk"})
+    assert refused.status_code == 409 and "already in the queue (picked by you)" in refused.json()["detail"]
