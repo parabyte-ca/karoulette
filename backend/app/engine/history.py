@@ -59,7 +59,7 @@ class HistoryMixin:
             "superset": bool(r["is_superset"]), "theme": r["theme_name"], "cheers": r["cheers"],
             "round": r["round_number"],
         } for r in rows]
-        return {"songs": songs, "public": self.history_public()}
+        return {"songs": songs, "public": self.history_public(), "awards": self.awards()}
 
     def history_public(self) -> bool:
         return bool(self.db.get_setting("history_public", True))

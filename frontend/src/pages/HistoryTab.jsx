@@ -130,7 +130,7 @@ export default function HistoryTab({ push }) {
       <SingersAdmin push={push} onChanged={load} />
       <SpotifySetup spotify={data.spotify} push={push}
                     onSaved={(clientId) => setData({ ...data, spotify: { ...data.spotify, client_id: clientId } })} />
-      <HistoryDashboard songs={data.songs} />
+      <HistoryDashboard songs={data.songs} awards={data.awards} />
     </section>
   );
 }

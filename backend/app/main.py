@@ -90,6 +90,13 @@ class SwitchIn(BaseModel):
     on: bool
 
 
+class SuggestIn(BaseModel):
+    to_guest_id: int
+    video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
+    title: str | None = Field(default=None, max_length=300)
+    channel: str | None = Field(default=None, max_length=200)
+
+
 class SingerCodeIn(BaseModel):
     code: str = Field(min_length=1, max_length=10)
 
@@ -214,7 +221,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     limits = {
         "search_guest": RateLimiter(10, 60), "search_ip": RateLimiter(60, 60),
         "join": RateLimiter(15, 60), "login": RateLimiter(8, 60), "queue": RateLimiter(10, 60),
-        "react": RateLimiter(20, 10), "originals": RateLimiter(60, 60),
+        "react": RateLimiter(20, 10), "originals": RateLimiter(60, 60), "like": RateLimiter(30, 10),
     }
 
     pending_state: dict[int, asyncio.Task] = {}
@@ -513,23 +520,55 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
             raise HTTPException(503, str(exc)) from exc
         return {**found, "results": engine.mark_duplicates(ev["id"], found["results"])}
 
-    @app.post("/api/guest/queue")
-    async def guest_queue(body: QueueIn, guest: dict = Depends(current_guest)):
-        limit("queue", f"g{guest['id']}")
-        info = await yt.verify(body.video_id)
+    async def checked_video(video_id: str, title: str | None, channel: str | None) -> dict:
+        info = await yt.verify(video_id)
         if info is None:
             raise HTTPException(404, "That video isn't available on YouTube.")
         if not info.get("embeddable", True) or info.get("live"):
             raise HTTPException(422, "That video can't be played here (embedding is turned off). Pick another!")
-        video = {
-            "video_id": body.video_id,
-            "title": info.get("title") or (body.title or "").strip() or "Untitled",
-            "channel": info.get("channel") or (body.channel or "").strip(),
-            "thumbnail": info.get("thumbnail") or f"https://i.ytimg.com/vi/{body.video_id}/mqdefault.jpg",
+        return {
+            "video_id": video_id,
+            "title": info.get("title") or (title or "").strip() or "Untitled",
+            "channel": info.get("channel") or (channel or "").strip(),
+            "thumbnail": info.get("thumbnail") or f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
             "duration_s": info.get("duration_s"),
         }
+
+    @app.post("/api/guest/queue")
+    async def guest_queue(body: QueueIn, guest: dict = Depends(current_guest)):
+        limit("queue", f"g{guest['id']}")
+        video = await checked_video(body.video_id, body.title, body.channel)
         item = await run(engine.queue_song, guest["id"], video, body.duet_guest_id, event_id=guest["event_id"])
         return {"ok": True, "item_id": item["id"]}
+
+    @app.post("/api/guest/like/{item_id}")
+    async def guest_like(item_id: int, guest: dict = Depends(current_guest)):
+        limit("like", f"g{guest['id']}")
+        return await run(engine.toggle_like, guest["id"], item_id, event_id=guest["event_id"])
+
+    @app.post("/api/guest/suggest")
+    async def guest_suggest(body: SuggestIn, guest: dict = Depends(current_guest)):
+        limit("queue", f"g{guest['id']}")
+        video = await checked_video(body.video_id, body.title, body.channel)
+        return await run(engine.suggest_song, guest["id"], body.to_guest_id, video, event_id=guest["event_id"])
+
+    @app.get("/api/guest/suggestions")
+    async def guest_suggestions(guest: dict = Depends(current_guest)):
+        return engine.song_requests_for(guest["id"])
+
+    @app.post("/api/guest/suggestions/{request_id}/add")
+    async def guest_add_suggestion(request_id: int, guest: dict = Depends(current_guest)):
+        item = await run(engine.accept_request, guest["id"], request_id, event_id=guest["event_id"])
+        return {"ok": True, "item_id": item["id"]}
+
+    @app.post("/api/guest/suggestions/{request_id}/dismiss")
+    async def guest_dismiss_suggestion(request_id: int, guest: dict = Depends(current_guest)):
+        await run(engine.dismiss_request, guest["id"], request_id)
+        return {"ok": True}
+
+    @app.get("/api/guest/awards")
+    async def guest_awards(guest: dict = Depends(current_guest)):
+        return {"awards": engine.personal_awards(guest["id"])}
 
     @app.post("/api/guest/queue/{item_id}/leave-duet")
     async def guest_leave_duet(item_id: int, guest: dict = Depends(current_guest)):

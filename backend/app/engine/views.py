@@ -26,6 +26,7 @@ class ViewsMixin:
 
         active_set = self._active_set(event_id)
         set_id = active_set["id"] if active_set else None
+        likers = self._likers(event_id)
 
         def item_out(i: dict) -> dict:
             return {"id": i["id"], "video_id": i["video_id"], "title": i["title"], "channel": i["channel"],
@@ -37,7 +38,8 @@ class ViewsMixin:
                     "flags": flag_counts.get(i["id"], 0), "status": i["status"],
                     "duet_guest_id": i["duet_guest_id"],
                     "duet_name": names.get(i["duet_guest_id"]) if i["duet_guest_id"] else None,
-                    "started_at": i["played_at"] if i["status"] == "playing" else None, "cheers": i["cheers"]}
+                    "started_at": i["played_at"] if i["status"] == "playing" else None, "cheers": i["cheers"],
+                    "likes": len(likers.get(i["id"], [])), "liked_by": likers.get(i["id"], [])}
 
         queue = [item_out(i) for i in self._queue(event_id)]
         playing = self.db.one("SELECT * FROM queue_items WHERE id = ?", (ev["now_playing_item_id"],)) \
@@ -157,6 +159,10 @@ class ViewsMixin:
         song = (lambda s: {"title": s["title"], "singer": s["display_name"] + (f" & {s['duet_name']}"
                                                                               if s["duet_name"] else "")})
         longest = max(sung, key=lambda s: s["duration_s"] or 0, default=None)
+        likes = {r["item_id"]: r["n"] for r in self.db.all(
+            "SELECT l.item_id, COUNT(*) AS n FROM likes l JOIN queue_items q ON q.id = l.item_id "
+            "WHERE q.event_id = ? AND q.status = 'played' GROUP BY l.item_id", (event_id,))}
+        loved = max(sung, key=lambda s: likes.get(s["id"], 0), default=None)
         return {
             "songs": len(sung),
             "singers": len(per_singer),
@@ -171,6 +177,8 @@ class ViewsMixin:
             "superset_stars": stars,
             "crowd_favourite": ({**song(fav), "cheers": fav["cheers"]} if fav and fav["cheers"] else None),
             "most_cheered": ({"singer": top_cheered[0], "cheers": top_cheered[1]} if top_cheered else None),
+            "most_loved": ({**song(loved), "likes": likes[loved["id"]]} if loved and likes.get(loved["id"]) else None),
+            "awards": self.event_awards(event_id),
             "late_joiners": self.db.one(
                 "SELECT COUNT(*) AS n FROM guests WHERE event_id = ? AND joined_at > ?",
                 (event_id, ev["started_at"] or float("inf")))["n"],

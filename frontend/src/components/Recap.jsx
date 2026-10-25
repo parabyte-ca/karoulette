@@ -16,6 +16,7 @@ export default function Recap({ recap, eventName, me = null, size = "tv" }) {
   const mine = me ? recap.per_singer?.[me] || 0 : null;
   const highlights = [
     recap.crowd_favourite && ["🔥 Crowd favourite", `${recap.crowd_favourite.singer} · ${decodeEntities(recap.crowd_favourite.title)} (${recap.crowd_favourite.cheers} cheers)`],
+    recap.most_loved && ["❤️ Most loved", `${recap.most_loved.singer} · ${decodeEntities(recap.most_loved.title)} (${recap.most_loved.likes} like${recap.most_loved.likes === 1 ? "" : "s"})`],
     recap.most_cheered && ["📣 Most cheered singer", `${recap.most_cheered.singer} (${recap.most_cheered.cheers} cheers)`],
     recap.top_singers.length > 0 && ["🏆 Most songs", `${recap.top_singers.join(", ")} (${recap.top_count})`],
     recap.top_themes.length > 0 && ["🎰 Top themes", recap.top_themes.join(", ")],
@@ -23,6 +24,8 @@ export default function Recap({ recap, eventName, me = null, size = "tv" }) {
     recap.first_song && ["🎬 Opened the night", `${recap.first_song.singer} · ${decodeEntities(recap.first_song.title)}`],
     recap.last_song && recap.songs > 1 && ["🌙 Closed it out", `${recap.last_song.singer} · ${decodeEntities(recap.last_song.title)}`],
     recap.longest_song && ["⏱ Longest song", `${recap.longest_song.singer} · ${decodeEntities(recap.longest_song.title)}`],
+    recap.awards?.first_nights.length > 0 && ["🎉 First night!", recap.awards.first_nights.join(", ")],
+    recap.awards?.milestones.length > 0 && ["🏅 Milestones", recap.awards.milestones.join(" · ")],
     recap.late_joiners > 0 && ["🎉 Joined mid-party", `${recap.late_joiners} new singer${recap.late_joiners === 1 ? "" : "s"}`],
   ].filter(Boolean);
 

@@ -420,6 +420,7 @@ export default function HostScreen() {
                       {item.duration_s ? ` · ${formatDuration(item.duration_s)}` : ""}
                       {item.round && !item.priority ? ` · R${item.round}` : ""}
                       {item.is_superset && item.flags > 0 && <span className="flag-badge">⚑ {item.flags}</span>}
+                      {item.likes > 0 && <span className="like-badge" title="Likes from phones">❤️ {item.likes}</span>}
                     </div>
                   </div>
                   <div className={`q-actions ${controlsVisible ? "" : "hidden"}`}>

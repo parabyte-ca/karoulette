@@ -564,6 +564,14 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 .recap-playlist img { width: 7em; height: 7em; background: #fff; border-radius: 10px; padding: 0.25em; flex: none; }
 .recap-playlist b { display: block; font-size: 1.3em; color: var(--highlight); }
 .recap-playlist span { color: var(--text); font-weight: 700; }
+/* On the TV the QR card is a narrow column, so the recap gets the room for two columns of highlights. */
+@media (min-width: 901px) {
+  .recap-overlay .recap { flex: 1 1 0; min-width: 0; }
+  .recap-overlay .recap-playlist { flex: 0 0 15em; flex-direction: column; text-align: center; margin: 0; }
+  .recap-overlay .recap-playlist img { width: 9em; height: 9em; }
+  .recap-overlay .recap-tiles { grid-template-columns: repeat(auto-fit, minmax(6.5em, 1fr)); }
+  .recap-overlay .recap-highlights { grid-template-columns: repeat(auto-fit, minmax(13em, 1fr)); }
+}
 .setup-steps { padding-left: 1.4em; display: flex; flex-direction: column; gap: 0.4em; }
 .setup-steps code { word-break: break-all; background: var(--input); padding: 0.05em 0.35em; border-radius: 4px; }
 .result.already img, .result.already .r-title { opacity: 0.55; }
@@ -608,3 +616,26 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 .disputes li { columns: auto; }
 .name-list.disputes { columns: 1; max-height: none; }
 .singer-code { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.12em; color: var(--highlight); }
+
+/* Likes, suggestions, personal bests and awards (v0.15.0) */
+.like-badge { margin-left: 0.5em; font-weight: 800; white-space: nowrap; }
+.like-btn { min-width: 3.2em; padding-inline: 0.6em; white-space: nowrap; }
+.like-btn.liked { border-color: var(--accent); }
+.like-count { font-weight: 800; white-space: nowrap; align-self: center; }
+.now-mini .like-btn { margin-left: 0.5em; padding-block: 0.2em; }
+.suggestions { border-color: var(--highlight); }
+.my-bests summary { cursor: pointer; }
+.bests-new { margin: 0.6em 0 0.2em; padding-left: 1.2em; color: var(--highlight); font-weight: 800; }
+.bests { margin: 0.6em 0 0; display: grid; gap: 0.35em; }
+.bests dt { color: var(--muted); font-size: 0.85em; font-weight: 700; }
+.bests dd { margin: 0; font-weight: 700; }
+.awards { margin-bottom: 1em; }
+.awards h3 { margin: 0 0 0.6em; }
+.awards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15em, 1fr)); gap: 0.8em; }
+.award-card { background: var(--card-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 0.9em 1em; }
+.award-card h4 { margin: 0 0 0.5em; }
+.award-card ul, .award-card ol { margin: 0; padding-left: 1.2em; display: grid; gap: 0.45em; }
+.award-card ul { list-style: none; padding-left: 0; }
+.award-card li > b, .award-card li > small { display: block; }
+.award-card li > b { font-size: 0.85em; color: var(--muted); font-weight: 700; }
+.award-card p { margin: 0.6em 0 0; }

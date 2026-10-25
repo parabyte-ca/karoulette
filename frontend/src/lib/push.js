@@ -6,7 +6,7 @@ import { api } from "./api";
 export const KINDS = [
   ["turn", "Up next and you're up", "Two songs to go, up next, and grab the mic"],
   ["superset", "Superset turns and votes", "Your Superset pick, and when someone calls a vote"],
-  ["duet", "Duet invites and song issues", "Someone added you to a duet, or your song couldn't play"],
+  ["duet", "Duets, suggestions and song issues", "A duet invite, a song suggested for you, or a song that couldn't play"],
   ["playlist", "End-of-night playlist", "Tonight's songs as a playlist when the event ends"],
 ];
 export const DEFAULT_PREFS = Object.fromEntries(KINDS.map(([k]) => [k, true]));

@@ -19,7 +19,7 @@ export default function HistoryPage() {
       </header>
       {error ? <section className="card"><p>{error}</p></section>
         : !data ? <p className="muted">Loading the song history…</p>
-          : <section className="card"><HistoryDashboard songs={data.songs} /></section>}
+          : <section className="card"><HistoryDashboard songs={data.songs} awards={data.awards} /></section>}
     </main>
   );
 }

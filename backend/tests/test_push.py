@@ -168,3 +168,14 @@ def test_guest_push_endpoints_and_delivery(tmp_path):
         assert c.post("/api/guest/push/off", json={"endpoint": "https://push.example/1"}, headers=h).json()["ok"]
         assert c.put("/api/guest/push/prefs", json={"endpoint": "https://push.example/1", "prefs": {}},
                      headers=h).status_code == 404
+
+
+def test_song_suggestions_alert_under_duets(engine, make_event):
+    ev, (alex, blake, _) = make_event()
+    subscribe_all(engine, (blake,))
+    engine.suggest_song(alex["id"], blake["id"], {"video_id": "abcdefghijk", "title": "ABBA - Waterloo (Karaoke)"})
+    [(sub, payload)] = engine.push_jobs(engine.drain())
+    assert payload["title"] == "🎁 Song suggestion" and "Alex suggests" in payload["body"]
+    engine.set_push_prefs(blake["id"], sub["endpoint"], {"duet": False})
+    engine.suggest_song(alex["id"], blake["id"], {"video_id": "abcdefghij2", "title": "Queen - Bohemian Rhapsody"})
+    assert engine.push_jobs(engine.drain()) == []
