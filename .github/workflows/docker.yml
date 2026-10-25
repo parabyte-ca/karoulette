@@ -7,9 +7,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Read-only by default; only the docker job may push packages and sign.
 permissions:
   contents: read
-  packages: write
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/karoulette
@@ -105,6 +105,11 @@ jobs:
   docker:
     needs: [test, e2e, load]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write       # keyless cosign signing (Sigstore)
+      attestations: write
     steps:
       - uses: actions/checkout@v6
       - name: Read VERSION
@@ -127,7 +132,8 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
             type=sha,format=short
-      - uses: docker/build-push-action@v7
+      - id: build
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -136,3 +142,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Attestations ride along with the pushed image; PR builds aren't pushed.
+          provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
+          sbom: ${{ github.event_name != 'pull_request' }}
+      - uses: sigstore/cosign-installer@v3
+        if: github.event_name != 'pull_request'
+      - name: Sign the image (keyless)
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
