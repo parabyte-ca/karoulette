@@ -18,13 +18,14 @@ from .history import HistoryMixin
 from .lastcall import LastCallMixin
 from .playback import PlaybackMixin
 from .queue import QueueMixin
+from .singers import SingersMixin
 from .supersets import SupersetsMixin
 from .themes import ThemesMixin
 from .views import ViewsMixin
 
 
 class Engine(EventsMixin, GuestsMixin, ThemesMixin, SupersetsMixin, QueueMixin, PlaybackMixin, LastCallMixin,
-             HistoryMixin, ViewsMixin, EngineBase):
+             HistoryMixin, SingersMixin, ViewsMixin, EngineBase):
     """Everything an event can do. See each mixin's module for its part."""
 
 

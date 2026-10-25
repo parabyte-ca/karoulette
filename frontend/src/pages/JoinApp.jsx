@@ -11,10 +11,13 @@ import { SupersetChooser, SupersetLineup } from "../components/Superset";
 import { Toasts, useToasts } from "../components/Toasts";
 import { formatWait, secondsUntil, singers, sings } from "../lib/eta";
 import { alertsSupported, notify, useInstall } from "../lib/pwa";
+import { ClaimSheet, PastSongs, SingerFooter, SingerWelcome, rememberSinger } from "../components/SingerCode";
 
 function JoinForm({ initialCode, onJoined }) {
   const [code, setCode] = useState((initialCode || "").toUpperCase());
-  const [name, setName] = useState("");
+  const [singer, setSinger] = useState(() => guestSession.singer);
+  const [name, setName] = useState(() => guestSession.singer?.name || "");
+  const [codeEntry, setCodeEntry] = useState(null); // null = closed, "" = typing a singer code
   const [rejoin, setRejoin] = useState(false);
   const [rejoinCode, setRejoinCode] = useState("");
   const [eventName, setEventName] = useState("");
@@ -37,8 +40,11 @@ function JoinForm({ initialCode, onJoined }) {
     try {
       const res = rejoin
         ? await api("/api/guest/rejoin", { method: "POST", body: { code: code.trim(), rejoin_code: rejoinCode.trim() } })
-        : await api("/api/guest/join", { method: "POST", body: { code: code.trim(), name: name.trim() } });
+        : await api("/api/guest/join", { method: "POST", body: {
+          code: code.trim(), name: name.trim(), singer_code: singer?.code || null, known_tokens: guestSession.pastTokens } });
       guestSession.save(res.token, res.event.join_code);
+      if (res.singer) rememberSinger(res.singer);
+      else if (res.code_invalid) rememberSinger(null);
       onJoined(res);
     } catch (err) {
       setError(err.message);
@@ -46,6 +52,18 @@ function JoinForm({ initialCode, onJoined }) {
       setBusy(false);
     }
   };
+
+  const checkCode = async () => {
+    setError("");
+    try {
+      const s = await api("/api/public/singer-check", { method: "POST", body: { code: codeEntry } });
+      setSinger(s);
+      rememberSinger(s);
+      setName(s.name);
+      setCodeEntry(null);
+    } catch (err) { setError(err.message); }
+  };
+  const notMe = () => { rememberSinger(null); setSinger(null); setName(""); };
 
   return (
     <main className="phone center-page">
@@ -66,11 +84,25 @@ function JoinForm({ initialCode, onJoined }) {
                    placeholder="6 letters and numbers" className="code-input" />
           </label>
         ) : (
+          <>
+          {singer ? (
+            <p className="welcome-back small">👋 Welcome back, <strong>{singer.name}</strong>! Singer code
+              <code> {singer.code}</code> · <button type="button" className="btn btn-link small" onClick={notMe}>Not you?</button></p>
+          ) : codeEntry === null ? (
+            <button type="button" className="btn btn-link small" onClick={() => setCodeEntry("")}>Have a singer code?</button>
+          ) : (
+            <div className="row singer-code-entry">
+              <input value={codeEntry} maxLength={6} autoFocus placeholder="Your singer code" aria-label="Singer code"
+                     onChange={(e) => setCodeEntry(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))} />
+              <button type="button" className="btn" disabled={codeEntry.length !== 6} onClick={checkCode}>Use</button>
+            </div>
+          )}
           <label className="field">
             <span>Your display name</span>
             <input value={name} onChange={(e) => setName(e.target.value)} maxLength={24} required autoFocus={!!code}
                    placeholder="What should the TV call you?" autoComplete="nickname" />
           </label>
+          </>
         )}
         {error && <p className="error">{error}</p>}
         {rejoin ? (
@@ -243,6 +275,10 @@ function VoteCard({ vote, myId, serverNow, push }) {
 
 function GuestHome({ me, onLeave }) {
   const { toasts, push } = useToasts();
+  const [singer, setSinger] = useState(me.singer || null);
+  const [welcome, setWelcome] = useState(!!(me.new || me.code_invalid));
+  const [claiming, setClaiming] = useState(false);
+  const singerChanged = (s) => { setSinger(s); rememberSinger(s); };
   const [tab, setTab] = useState("me");
   const [spinMeta, setSpinMeta] = useState({ candidates: [] });
   const [themes, setThemes] = useState([]);
@@ -419,6 +455,10 @@ function GuestHome({ me, onLeave }) {
         </div>
       </header>
 
+      {welcome && <SingerWelcome me={{ ...me, singer }} push={push} onChanged={singerChanged}
+                                 onDismiss={() => setWelcome(false)} onClaim={() => { setWelcome(false); setClaiming(true); }} />}
+      {claiming && <ClaimSheet push={push} onClose={() => setClaiming(false)} onChanged={singerChanged} />}
+
       {sup && (
         <section className={`card set-card ${myTurnWaiting ? "my-turn" : ""}`}>
           <div className="label">★ Superset · everyone sings</div>
@@ -489,6 +529,8 @@ function GuestHome({ me, onLeave }) {
               </section>
             </>
           )}
+
+          {ev.status !== "ended" && singer && <PastSongs onAdd={(s) => addSong(s, null)} canAdd={!atCap && !pastLastCall} push={push} />}
 
           {ev.status !== "ended" && <SearchPanel canAdd={!atCap && !pastLastCall} onAdd={addSong} push={push}
                                                  suggest={suggest} panelRef={searchRef}
@@ -607,6 +649,7 @@ function GuestHome({ me, onLeave }) {
             <br /><span className="muted">Switching phones? Use it with the event code to keep your place and songs.</span></p>
         )}
         {ev.status !== "ended" && <a className="btn btn-link" href={`/playlist/${ev.join_code}`}>🎶 Tonight's playlist so far</a>}
+        <SingerFooter singer={singer} push={push} onClaim={() => { setClaiming(true); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
         {canInstall && <button className="btn" onClick={install}>📲 Install Karoulette</button>}
         {iosHint && <p className="muted small">Tip: tap Share, then “Add to Home Screen” to keep Karoulette one tap away.</p>}
         <button className="btn btn-link" onClick={leave}>Leave event</button>
@@ -634,7 +677,7 @@ export default function JoinApp() {
         // Scanning a different event's QR code starts a fresh session.
         if (code && res.event.join_code !== code.toUpperCase()) { guestSession.clear(); setMe(null); }
         else if (res.event.status === "ended") { guestSession.clear(); setMe(null); }
-        else setMe(res);
+        else { setMe(res); if (res.singer) rememberSinger(res.singer); }
       })
       .catch(() => guestSession.clear())
       .finally(() => setChecking(false));

@@ -199,6 +199,24 @@ CREATE TABLE IF NOT EXISTS files (                    -- small uploads kept in t
     updated_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS singers (                  -- a person across events, known by their singer code
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS singer_claims (            -- a claim on a night that someone else already owns
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    singer_id INTEGER NOT NULL REFERENCES singers(id) ON DELETE CASCADE,
+    guest_id INTEGER NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
+    how TEXT NOT NULL,                             -- phone (this phone was there) | name (picked the name)
+    status TEXT NOT NULL DEFAULT 'pending',        -- pending | approved | declined
+    created_at REAL NOT NULL,
+    decided_at REAL,
+    UNIQUE(singer_id, guest_id)
+);
+
 CREATE TABLE IF NOT EXISTS quota_ledger (
     day TEXT PRIMARY KEY,
     units_used INTEGER NOT NULL DEFAULT 0,
@@ -232,6 +250,9 @@ ADDED_COLUMNS = [
     ("guests", "rejoin_code", "TEXT"),                 # lets a singer get back in on another phone
     # v0.12.0
     ("events", "archived_at", "REAL"),                 # hidden from the lists, kept in the song history
+    # v0.13.0
+    ("guests", "singer_id", "INTEGER"),                # the singer (code) this night belongs to
+    ("guests", "claimed_how", "TEXT"),                 # phone | name | host
 ]
 
 

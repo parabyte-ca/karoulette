@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.13.0] - 2026-10-25
+### Added
+- **Singer codes**: every singer gets a personal six-character code the first time they join. It's saved on their phone, so at the next event their name is filled in ("Welcome back!") and their **past songs** are one tap away. On another phone, "Have a singer code?" brings their name and history along. The code is in the phone's footer with a Copy button.
+- **Claim your past nights**: right after getting a code (and any time from the footer), singers can claim earlier nights:
+  - nights this phone was at are claimed automatically;
+  - on the honour system, they tick the names they sang under, and every night under that name (with its merged spellings) becomes theirs.
+  - Each night belongs to one singer code and the first claim wins. A claim on a night that's already linked to another code goes to the host to decide.
+- **Singers and codes** (Host admin → Song history): every code with the nights it owns, claims to decide (approve moves the night, Keep leaves it), moving or unclaiming any night, giving unclaimed nights to a singer, and resetting a code that was shared or lost (that phone is asked for the new code next time).
+- Song history counts songs by singer code first (so "Al" and "Alan" on one code are one singer); your name merges still apply on top.
+
 ## [0.12.0] - 2026-10-25
 ### Added
 - **Archive events** (Host admin → Events): hides an event from the TV's event list and the admin list (tick "Show archived events" to see them) while keeping its songs in the Song history and playlists. Unarchive any time. Running events must be ended first.

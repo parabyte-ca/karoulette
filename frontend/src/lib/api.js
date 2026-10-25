@@ -8,6 +8,12 @@ export class ApiError extends Error {
 
 const TOKEN_KEY = "kq_token";
 const CODE_KEY = "kq_code";
+const SINGER_KEY = "kq_singer";
+const PAST_KEY = "kq_past_tokens"; // every event this phone joined: proves it was there when claiming past nights
+
+const readJson = (key, fallback) => {
+  try { return JSON.parse(localStorage.getItem(key) || "null") ?? fallback; } catch { return fallback; }
+};
 
 export const guestSession = {
   get token() {
@@ -20,7 +26,23 @@ export const guestSession = {
     try {
       localStorage.setItem(TOKEN_KEY, token);
       localStorage.setItem(CODE_KEY, code);
+      const past = readJson(PAST_KEY, []).filter((t) => t !== token);
+      localStorage.setItem(PAST_KEY, JSON.stringify([token, ...past].slice(0, 30)));
     } catch { /* private mode: session only lasts this tab */ }
+  },
+  /** Tokens from earlier events on this phone (and the current one, which may be from a past event). */
+  get pastTokens() {
+    const past = readJson(PAST_KEY, []);
+    const current = this.token;
+    return current && !past.includes(current) ? [current, ...past] : past;
+  },
+  /** The phone's singer code: {code, name}. Kept when an event ends, so the next event knows you. */
+  get singer() { return readJson(SINGER_KEY, null); },
+  saveSinger(singer) {
+    try {
+      if (singer?.code) localStorage.setItem(SINGER_KEY, JSON.stringify({ code: singer.code, name: singer.name }));
+      else localStorage.removeItem(SINGER_KEY);
+    } catch { /* private mode */ }
   },
   clear() {
     try {

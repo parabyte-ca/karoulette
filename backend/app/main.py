@@ -39,6 +39,8 @@ log = logging.getLogger("karoulette")
 class JoinIn(BaseModel):
     code: str = Field(min_length=3, max_length=10)
     name: str = Field(min_length=1, max_length=40)
+    singer_code: str | None = Field(default=None, max_length=10)
+    known_tokens: list[str] = Field(default_factory=list, max_length=30)
 
 
 class RejoinIn(BaseModel):
@@ -85,6 +87,23 @@ class SingerNameIn(BaseModel):
 
 class SwitchIn(BaseModel):
     on: bool
+
+
+class SingerCodeIn(BaseModel):
+    code: str = Field(min_length=1, max_length=10)
+
+
+class ClaimIn(BaseModel):
+    names: list[str] = Field(min_length=1, max_length=20)
+
+
+class AssignIn(BaseModel):
+    guest_id: int
+    singer_id: int | None = None
+
+
+class DecideIn(BaseModel):
+    approve: bool
 
 
 class OriginalsIn(BaseModel):
@@ -336,9 +355,12 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         except EngineError as exc:
             raise HTTPException(exc.status, exc.message) from exc
         guest, token = await run(engine.join, ev["id"], body.name, event_id=ev["id"])
+        ACTOR.set(("guest", guest["id"], guest["display_name"]))
+        attached = await run(engine.attach_singer, guest["id"], body.singer_code,
+                             [t[:100] for t in body.known_tokens], event_id=ev["id"])
         return {"token": token,
                 "guest": {"id": guest["id"], "name": guest["display_name"], "rejoin_code": guest["rejoin_code"]},
-                "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"]}}
+                "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"]}, **attached}
 
     @app.post("/api/guest/rejoin")
     async def guest_rejoin(body: RejoinIn, request: Request):
@@ -350,7 +372,8 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         guest, token = await run(engine.rejoin, ev["id"], body.rejoin_code, event_id=ev["id"])
         return {"token": token,
                 "guest": {"id": guest["id"], "name": guest["display_name"], "rejoin_code": guest["rejoin_code"]},
-                "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"]}}
+                "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"]},
+                "singer": engine.singer_info(engine._singer(guest["singer_id"]))}
 
     @app.get("/api/guest/me")
     async def guest_me(guest: dict = Depends(current_guest)):
@@ -358,7 +381,49 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
         async with lock:
             code = engine.rejoin_code(guest["id"])
         return {"guest": {"id": guest["id"], "name": guest["display_name"], "rejoin_code": code},
-                "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"], "status": ev["status"]}}
+                "event": {"id": ev["id"], "name": ev["name"], "join_code": ev["join_code"], "status": ev["status"]},
+                "singer": engine.singer_info(engine._singer(guest["singer_id"]))}
+
+    # ------------------------------------------------------------------ returning singers
+
+    def my_singer(guest: dict) -> dict:
+        singer = engine._singer(guest["singer_id"])
+        if not singer:
+            raise HTTPException(409, "You don't have a singer code yet.")
+        return singer
+
+    @app.post("/api/public/singer-check")
+    async def singer_check(body: SingerCodeIn, request: Request):
+        """The join page's "I have a singer code": whose code is it?"""
+        limit("join", client_ip(request))
+        try:
+            singer = engine.singer_by_code(body.code)
+        except EngineError as exc:
+            raise HTTPException(exc.status, exc.message) from exc
+        return {"name": singer["display_name"], "code": singer["code"]}
+
+    @app.post("/api/guest/singer-code")
+    async def guest_singer_code(body: SingerCodeIn, request: Request, guest: dict = Depends(current_guest)):
+        limit("join", client_ip(request))
+        return {"singer": await run(engine.use_singer_code, guest["id"], body.code, event_id=guest["event_id"])}
+
+    @app.post("/api/guest/singer/new")
+    async def guest_new_singer(guest: dict = Depends(current_guest)):
+        """After the host reset this phone's code: start a fresh one for tonight."""
+        return await run(engine.attach_singer, guest["id"], None, [], event_id=guest["event_id"])
+
+    @app.get("/api/guest/claimable")
+    async def guest_claimable(guest: dict = Depends(current_guest)):
+        return engine.claimable_names(my_singer(guest)["code"])
+
+    @app.post("/api/guest/claim")
+    async def guest_claim(body: ClaimIn, guest: dict = Depends(current_guest)):
+        return await run(engine.claim_names, my_singer(guest)["code"], body.names, event_id=guest["event_id"])
+
+    @app.get("/api/guest/past-songs")
+    async def guest_past_songs(guest: dict = Depends(current_guest)):
+        singer = engine._singer(guest["singer_id"])
+        return engine.past_songs(singer["code"]) if singer else []
 
     @app.get("/api/guest/state")
     async def guest_state(guest: dict = Depends(current_guest)):
@@ -638,6 +703,24 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     @app.post("/api/host/history/unmerge", dependencies=host)
     async def unmerge_singer(body: SingerNameIn):
         return await run(engine.unmerge_singer, body.name)
+
+    # ------------------------------------------------------------------ host: singers
+
+    @app.get("/api/host/singers", dependencies=host)
+    async def host_singers():
+        return engine.singers_admin()
+
+    @app.post("/api/host/singers/assign", dependencies=host)
+    async def host_assign_night(body: AssignIn):
+        return await run(engine.assign_night, body.guest_id, body.singer_id)
+
+    @app.post("/api/host/singers/{singer_id}/reset-code", dependencies=host)
+    async def host_reset_code(singer_id: int):
+        return await run(engine.reset_singer_code, singer_id)
+
+    @app.post("/api/host/singer-claims/{claim_id}", dependencies=host)
+    async def host_decide_claim(claim_id: int, body: DecideIn):
+        return await run(engine.decide_claim, claim_id, body.approve)
 
     # ------------------------------------------------------------------ playlists
 
