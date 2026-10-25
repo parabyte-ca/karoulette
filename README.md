@@ -14,7 +14,7 @@ Karoulette runs your karaoke party from one TV and everyone's phones. The TV (ho
 - **"Get ready" screen**: before each song the TV shows the singer's name, the song and a countdown (default 5 seconds, set per event in Host admin; 0 turns it off) so they can reach the mic. **Start now** skips the rest.
 - **Host remote** (`/host/remote/<event>`): control the night from your phone: pause/play, volume up/down, skip, stop, smoke break, start the song now, re-spin, Supersets, play next and remove. Scan the QR code from the TV's **📱 Remote** button and sign in with the host PIN.
 - **Guest phone UI** (`/join`): mobile-first, no accounts (session token in `localStorage`), song search that's always open, "My songs" with each song's place in the queue and an **estimated wait** ("≈ 8 min"), the round's theme, full queue and singer order.
-- **Nearly-up alerts**: phones show and vibrate "two songs to go", "you're up next" and "you're up!". Tap **🔔 Buzz me when I'm nearly up** for system notifications while the phone is locked or on another app (needs HTTPS; on iPhone, install the app first).
+- **Nearly-up alerts**: phones show and vibrate "two songs to go", "you're up next" and "you're up!". Tap **🔔 Buzz me when I'm nearly up** for **push alerts** that reach the phone even when it's locked or Karoulette is closed: pick from up next / you're up, Superset turns and votes, duet invites and songs that couldn't play, and the end-of-night playlist. Needs HTTPS and outbound internet; on iPhone, add Karoulette to the Home Screen first (iOS 16.4+).
 - **Duets**: when adding a song, pick "As a duet with …" to sing it with another guest. Both names show on the TV, both phones get the alerts, and the partner can step out. The song counts as the picker's turn.
 - **Crowd reactions and the crowd meter**: while someone sings, phones get a row of 👏 🔥 😂 ❤️ 🎉 🤘 buttons; each tap floats up the TV with the sender's name and fills the 🔥 **crowd meter** beside the song (rate limited).
 - **End-of-night recap** on the TV and every phone: songs sung, singers, minutes of music, rounds, duets, the **crowd favourite** (most-cheered song) and **most cheered singer**, most songs, top themes, Superset stars, who opened and closed the night, and each guest's own count.
@@ -109,6 +109,7 @@ All settings live in `.env` (see `.env.example`).
 | `YOUTUBE_DAILY_QUOTA` | `10000` | Daily quota used for the remaining-quota estimate |
 | `SPOTIFY_CLIENT_ID` | _(blank)_ | Optional: the Client ID of your Spotify app, for Spotify playlists (or set it in Host admin → Song history → Playlists) |
 | `PUBLIC_BASE_URL` | _(blank)_ | Site address used in the QR code and join link previews, e.g. `https://karaoke.example.ca` (just the root; a pasted `/join` or `/host` is stripped). Blank = the address the TV used |
+| `VAPID_SUBJECT` | _(blank)_ | Optional contact for push alert services, e.g. `mailto:you@example.ca`. Blank = `PUBLIC_BASE_URL` when it's HTTPS |
 | `SECRET_KEY` | _(generated)_ | Signs host session cookies |
 | `ENABLE_YTDLP` | `true` | Allow the yt-dlp metadata fallback |
 | `UPDATE_CHECK` | `true` | Daily check for new releases (Host admin → Updates) |

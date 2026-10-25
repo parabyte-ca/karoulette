@@ -217,6 +217,16 @@ CREATE TABLE IF NOT EXISTS singer_claims (            -- a claim on a night that
     UNIQUE(singer_id, guest_id)
 );
 
+CREATE TABLE IF NOT EXISTS push_subscriptions (       -- a phone's Web Push subscription for tonight
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guest_id INTEGER NOT NULL REFERENCES guests(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    prefs TEXT NOT NULL DEFAULT '{}',              -- {"turn": true, "superset": true, "duet": true, "playlist": true}
+    created_at REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS quota_ledger (
     day TEXT PRIMARY KEY,
     units_used INTEGER NOT NULL DEFAULT 0,

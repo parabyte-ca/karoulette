@@ -10,7 +10,8 @@ import { EventPlaylistButtons } from "../components/PlaylistButtons";
 import { SupersetChooser, SupersetLineup } from "../components/Superset";
 import { Toasts, useToasts } from "../components/Toasts";
 import { formatWait, secondsUntil, singers, sings } from "../lib/eta";
-import { alertsSupported, notify, useInstall } from "../lib/pwa";
+import { notify, useInstall } from "../lib/pwa";
+import { AlertsOffer, AlertsSettings, useAlerts } from "../components/Alerts";
 import { ClaimSheet, PastSongs, SingerFooter, SingerWelcome, rememberSinger } from "../components/SingerCode";
 
 function JoinForm({ initialCode, onJoined }) {
@@ -282,7 +283,7 @@ function GuestHome({ me, onLeave }) {
   const [tab, setTab] = useState("me");
   const [spinMeta, setSpinMeta] = useState({ candidates: [] });
   const [themes, setThemes] = useState([]);
-  const [alerts, setAlerts] = useState(() => alertsSupported() && Notification.permission === "granted");
+  const [pushPrefs, setPushPrefs] = useAlerts();
   const { canInstall, install, iosHint } = useInstall();
   const prevIdx = useRef(null);
   const [choosing, setChoosing] = useState(false);
@@ -363,15 +364,6 @@ function GuestHome({ me, onLeave }) {
   const flag = async (itemId) => {
     try { await api(`/api/guest/flag/${itemId}`, { method: "POST", guest: true }); push("Flag sent to the host.", "info"); }
     catch (e) { push(e.message, "error"); }
-  };
-
-  const turnOnAlerts = async () => {
-    try {
-      const result = await Notification.requestPermission();
-      setAlerts(result === "granted");
-      push(result === "granted" ? "🔔 Alerts on. We'll buzz you when you're nearly up." : "Alerts are blocked in your browser settings.",
-        result === "granted" ? "success" : "warning");
-    } catch { /* unsupported */ }
   };
 
   // Heads-up when two songs stand between you and the mic (the server sends "up next" itself).
@@ -495,9 +487,7 @@ function GuestHome({ me, onLeave }) {
           <div className={`status-card ${firstIdx === 0 || singingNow ? "your-turn" : ""} ${superset ? "superset" : ""}`}>
             <div className={`status-big ${firstIdx === 0 || gettingReady ? "pulse" : ""}`}>{headline}</div>
             {sub && <div className="muted">{sub}</div>}
-            {ev.status !== "ended" && alertsSupported() && !alerts && (
-              <button className="btn btn-link small" onClick={turnOnAlerts}>🔔 Buzz me when I'm nearly up</button>
-            )}
+            {ev.status !== "ended" && !pushPrefs && <AlertsOffer onOn={setPushPrefs} push={push} />}
             {canCall && (
               <button className="btn btn-gold call-superset" onClick={() => setChoosing(true)}>★ Call a Superset</button>
             )}
@@ -649,6 +639,7 @@ function GuestHome({ me, onLeave }) {
             <br /><span className="muted">Switching phones? Use it with the event code to keep your place and songs.</span></p>
         )}
         {ev.status !== "ended" && <a className="btn btn-link" href={`/playlist/${ev.join_code}`}>🎶 Tonight's playlist so far</a>}
+        {pushPrefs && <AlertsSettings prefs={pushPrefs} onChange={setPushPrefs} push={push} />}
         <SingerFooter singer={singer} push={push} onClaim={() => { setClaiming(true); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
         {canInstall && <button className="btn" onClick={install}>📲 Install Karoulette</button>}
         {iosHint && <p className="muted small">Tip: tap Share, then “Add to Home Screen” to keep Karoulette one tap away.</p>}

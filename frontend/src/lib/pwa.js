@@ -1,5 +1,6 @@
 // Install-as-an-app support: the service worker, the install prompt and song alerts.
 import { useEffect, useState } from "react";
+import { pushActive } from "./push";
 
 let deferredPrompt = null;
 const listeners = new Set();
@@ -44,7 +45,8 @@ export const alertsSupported = () => "Notification" in window && window.isSecure
 
 /** A system notification, only when the page isn't on screen (the in-page toast covers the rest). */
 export async function notify(title, body) {
-  if (!alertsSupported() || Notification.permission !== "granted" || !document.hidden) return;
+  // With push alerts on, the server's push shows it (once) instead.
+  if (!alertsSupported() || Notification.permission !== "granted" || !document.hidden || pushActive()) return;
   const options = { body, icon: "/icon-192.png", badge: "/icon-192.png", tag: "karoulette", renotify: true,
     vibrate: [300, 150, 300] };
   try {

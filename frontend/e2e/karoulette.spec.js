@@ -567,3 +567,72 @@ test("returning singers: code saved on the phone, past songs, claiming and host 
   await expect(admin.locator(".toast", { hasText: "Kept with Zed P" })).toBeVisible();
   await expect(admin.locator(".history-table")).toContainText("(as Zed)");
 });
+
+test("push alerts: pick kinds, turn on, follow the phone to a new event, the service worker shows them", async ({ browser }) => {
+  const { ctx: hostCtx, ev, api } = await hostWithEvent(browser, "Push Night", { autoplay: false });
+  const ctx = await phoneContext(browser);
+  // Headless Chromium has no push service and always reports notifications as blocked: allow them, and hand
+  // out a subscription with real keys instead.
+  await ctx.addInitScript(() => {
+    Object.defineProperty(Notification, "permission", { get: () => "granted" });
+    Notification.requestPermission = async () => "granted";
+    const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const endpoint = "https://127.0.0.1:9/push/e2e";
+    const wrap = (keys) => keys && { endpoint, toJSON: () => ({ endpoint, keys }),
+      unsubscribe: async () => { localStorage.removeItem("e2e_push"); return true; } };
+    PushManager.prototype.getSubscription = async () => wrap(JSON.parse(localStorage.getItem("e2e_push")));
+    PushManager.prototype.subscribe = async () => {
+      const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+      const keys = { p256dh: b64(await crypto.subtle.exportKey("raw", pair.publicKey)), auth: b64(crypto.getRandomValues(new Uint8Array(16))) };
+      localStorage.setItem("e2e_push", JSON.stringify(keys));
+      return wrap(keys);
+    };
+  });
+  const page = await ctx.newPage();
+  await page.goto(`/join/${ev.join_code}`);
+  await page.getByPlaceholder("What should the TV call you?").fill("Pia");
+  await page.getByRole("button", { name: "Join the rotation" }).click();
+  await page.getByRole("button", { name: "🔔 Buzz me when I'm nearly up" }).click();
+  await expect(page.locator(".alert-kinds input")).toHaveCount(4);
+  await page.getByLabel(/End-of-night playlist/).uncheck();
+  const saved = page.waitForResponse((r) => r.url().endsWith("/api/guest/push") && r.request().method() === "POST");
+  await page.getByRole("button", { name: "Turn on alerts" }).click();
+  expect((await (await saved).json()).prefs).toEqual({ turn: true, superset: true, duet: true, playlist: false });
+  await expect(page.locator(".toast", { hasText: "Alerts on" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "🔔 Buzz me when I'm nearly up" })).toHaveCount(0);
+
+  await page.locator(".alerts-settings summary").click();
+  const changed = page.waitForResponse((r) => r.url().endsWith("/api/guest/push/prefs"));
+  await page.locator(".alerts-settings").getByLabel(/Duet invites/).uncheck();
+  expect((await (await changed).json()).prefs.duet).toBe(false);
+
+  // The same phone at the next event: its alerts move to the new guest by themselves.
+  const next = await (await api.post("/api/host/events", { data: { name: "Push Night 2", config: { superset_chance: 0 } } })).json();
+  await page.evaluate(() => { localStorage.removeItem("kq_token"); localStorage.removeItem("kq_code"); });
+  await page.goto(`/join/${next.join_code}`);
+  await page.getByPlaceholder("What should the TV call you?").fill("Pia");
+  const moved = page.waitForResponse((r) => r.url().endsWith("/api/guest/push") && r.request().method() === "POST");
+  await page.getByRole("button", { name: "Join the rotation" }).click();
+  expect((await (await moved).json()).prefs).toEqual({ turn: true, superset: true, duet: false, playlist: false });
+
+  // A push arriving while Karoulette isn't on screen becomes a notification that opens the right page.
+  // (Headless Chromium can't show notifications, so record what the worker asks for.)
+  const worker = ctx.serviceWorkers()[0] || await ctx.waitForEvent("serviceworker");
+  await page.goto("about:blank");
+  await worker.evaluate(() => {
+    self.shown = [];
+    self.registration.showNotification = async (title, options) => { self.shown.push({ title, ...options }); };
+    self.dispatchEvent(Object.assign(new Event("push"), {
+      data: { json: () => ({ title: "You're up next!", body: "Head to the mic", url: "/join/ABCD", tag: "karoulette-turn" }) },
+      waitUntil: () => {},
+    }));
+  });
+  await expect.poll(() => worker.evaluate(() => self.shown.map((n) => `${n.title}|${n.body}|${n.tag}|${n.data.url}`)))
+    .toEqual(["You're up next!|Head to the mic|karoulette-turn|/join/ABCD"]);
+
+  await page.goto(`/join/${next.join_code}`);
+  await page.locator(".alerts-settings summary").click();
+  await page.getByRole("button", { name: "Turn alerts off" }).click();
+  await expect(page.getByRole("button", { name: "🔔 Buzz me when I'm nearly up" })).toBeVisible();
+  await hostCtx.close();
+});

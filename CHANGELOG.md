@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0] - 2026-10-25
+### Added
+- **Push alerts**: alerts now reach a phone even when Karoulette is closed or the screen is locked. Guests tap **🔔 Buzz me when I'm nearly up**, tick what they'd like, then allow notifications:
+  - **Up next and you're up**: two songs to go, up next, and grab the mic;
+  - **Superset turns and votes**: your Superset pick, and when someone calls a vote (not sent to whoever called it);
+  - **Duet invites and song issues**: someone added you to a duet, or your song couldn't play;
+  - **End-of-night playlist**: tonight's songs as a playlist when the event ends (only if songs were sung).
+  - Change the ticks or turn alerts off any time from **🔔 Alerts are on** in the phone's footer. Alerts follow the phone to the next event by themselves.
+  - Tapping an alert opens the event (or the playlist). When Karoulette is open on screen, the in-page message shows instead of a second notification.
+  - **iPhone**: alerts need Karoulette on the Home Screen (iOS 16.4 or later); the phone explains how.
+  - Needs HTTPS and outbound internet (alerts go through Google, Apple or Mozilla's push service). The server makes its own signing key on first start; it's kept in the database, so backups carry it and phones stay subscribed after a restore.
+- `VAPID_SUBJECT` environment variable (optional): a contact for push services, e.g. `mailto:you@example.ca`. Defaults to `PUBLIC_BASE_URL` when that's HTTPS.
+
 ## [0.13.0] - 2026-10-25
 ### Added
 - **Singer codes**: every singer gets a personal six-character code the first time they join. It's saved on their phone, so at the next event their name is filled in ("Welcome back!") and their **past songs** are one tap away. On another phone, "Have a singer code?" brings their name and history along. The code is in the phone's footer with a Copy button.
