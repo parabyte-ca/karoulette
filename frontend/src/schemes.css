@@ -397,7 +397,9 @@
   animation: mirrorball 60s linear infinite;
 }
 @keyframes mirrorball { to { transform: rotate(360deg); } }
-[data-scheme="disco"] .tv > * { position: relative; z-index: 1; }
+/* Lift only the layout above the disco effect: a bare `.tv > *` also caught the fixed overlays (announcements,
+   toasts, dialogs, the tour), dropping them into the page flow underneath the video. */
+[data-scheme="disco"] .tv > :is(header, main, footer) { position: relative; z-index: 1; }
 
 /* Mirror Ball: gold-to-pink-to-ice lettering for the brand. */
 [data-scheme="disco"] .brand {
@@ -427,7 +429,7 @@
   from { transform: translateX(-6%) skewX(-8deg); }
   to { transform: translateX(6%) skewX(8deg); }
 }
-[data-scheme="aurora"] .tv > * { position: relative; z-index: 1; }
+[data-scheme="aurora"] .tv > :is(header, main, footer) { position: relative; z-index: 1; }
 
 /* The On Air lamp: the picking panel label glows like a studio light. */
 [data-scheme="onair"] .turn-panel .label { color: var(--accent); text-shadow: 0 0 12px var(--glow-1); }
@@ -470,7 +472,7 @@
   animation: haze 24s ease-in-out infinite alternate;
 }
 @keyframes haze { from { transform: translateX(-5%); } to { transform: translateX(5%); } }
-[data-scheme="stage"] .tv > * { position: relative; z-index: 1; }
+[data-scheme="stage"] .tv > :is(header, main, footer) { position: relative; z-index: 1; }
 
 /* ---------------------------------------------------------------- Banner photo
  * Main Stage's band photo, or the host's own upload (Host admin → Appearance). Shown on any skin

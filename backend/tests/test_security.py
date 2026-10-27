@@ -3,10 +3,12 @@ WebSocket origin check and token redaction in logs."""
 import logging
 
 import pytest
+from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from app import auth
-from app.main import _RedactTokens, push_endpoint_allowed
+from app.config import Settings
+from app.main import _RedactTokens, create_app, push_endpoint_allowed
 
 from .test_api import login
 
@@ -68,11 +70,22 @@ def test_push_subscription_to_the_lan_is_refused(client):
 
 def test_security_headers(client):
     plain = client.get("/api/health")
-    assert "Content-Security-Policy-Report-Only" in plain.headers
+    assert "frame-src https://www.youtube.com" in plain.headers["Content-Security-Policy"]  # enforced by default
+    assert "Content-Security-Policy-Report-Only" not in plain.headers
     assert "camera=()" in plain.headers["Permissions-Policy"]
     assert "Strict-Transport-Security" not in plain.headers
     https = client.get("/api/health", headers={"X-Forwarded-Proto": "https"})
     assert https.headers["Strict-Transport-Security"].startswith("max-age=")
+
+
+@pytest.mark.parametrize("mode,header", [("report", "Content-Security-Policy-Report-Only"), ("off", None)])
+def test_csp_can_be_relaxed(tmp_path, monkeypatch, mode, header):
+    monkeypatch.setenv("CSP_MODE", mode)
+    app = create_app(Settings(data_path=tmp_path, host_pin="4321", static_dir=tmp_path / "static"), start_ticker=False)
+    with TestClient(app) as c:
+        headers = c.get("/api/health").headers
+    assert "Content-Security-Policy" not in headers
+    assert (header in headers) if header else not any(h.startswith("content-security-policy") for h in headers)
 
 
 def test_host_websocket_refuses_other_sites(client):

@@ -755,3 +755,78 @@ test("help page, and the singer and host tours on first visit", async ({ browser
   await phoneCtx.close();
   await ctx.close();
 });
+
+test("no Content-Security-Policy violations on any screen", async ({ browser }) => {
+  const { ctx, ev } = await hostWithEvent(browser, "CSP Night", { themes_enabled: true });
+  const violations = [];
+  const watch = (page) => page.on("console", (m) => {
+    if (/Content Security Policy|Content-Security-Policy/i.test(m.text())) violations.push(`${page.url()}: ${m.text()}`);
+  });
+  ctx.on("page", watch);
+  const phone = await joinPhone(browser, ev, "Alex");
+  watch(phone);
+  await queue(phone, "Africa");
+  const tv = await openTv(ctx, ev);
+  await tv.getByRole("button", { name: "Start event" }).click();
+  for (const path of ["/", "/help", "/host", "/host/admin", `/host/remote/${ev.id}`, `/playlist/${ev.join_code}`, "/history", "/spotify"]) {
+    const page = await ctx.newPage();
+    await page.goto(path);
+    await page.waitForLoadState("networkidle");
+    await page.close();
+  }
+  await phone.reload();
+  await expect(phone.locator(".status-card")).toBeVisible();
+  expect(violations).toEqual([]);
+});
+
+test("TV announcements stay on top of the video, inside their band, on every skin layout", async ({ browser }) => {
+  const { ctx, ev, api } = await hostWithEvent(browser, "Bouche Night");
+  // Main Stage, Disco and Aurora lift the page above a background effect; that once dragged the announcements under the video.
+  await api.put("/api/host/appearance", { data: { scheme: "stage" } });
+  const alex = await joinPhone(browser, ev, "Alex");
+  await joinPhone(browser, ev, "Jean-Christophe Tremblay"); // the longest name a guest can have
+  await queue(alex, "Africa");
+  const tv = await openTv(ctx, ev);
+  await tv.setViewportSize({ width: 1024, height: 768 }); // the tightest TV layout
+  await tv.getByRole("button", { name: "Start event" }).click();
+
+  // Worst spill over the animation: past the band's top or bottom, or into its faded ends (8% each side). A band that
+  // isn't fixed to the screen, or text with something else drawn over it, counts as a big spill.
+  const spill = () => tv.evaluate(() => {
+    const band = document.querySelector(".superset-flash");
+    if (!band) return null;
+    if (getComputedStyle(band).position !== "fixed") return 1000;
+    const b = band.getBoundingClientRect();
+    const fade = b.width * 0.08;
+    band.style.pointerEvents = "auto"; // let elementFromPoint see the band
+    const covered = [...band.children].flatMap((el) => [...el.getClientRects()]).some((r) => [0.2, 0.5, 0.8].some((f) => {
+      const hit = document.elementFromPoint(r.left + r.width * f, r.top + r.height / 2);
+      return hit && !band.contains(hit);
+    }));
+    band.style.pointerEvents = "";
+    if (covered) return 500;
+    return Math.max(...[...band.children].flatMap((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return [...range.getClientRects()].map((r) => Math.max(b.top - r.top, r.bottom - b.bottom, b.left + fade - r.left, r.right - (b.right - fade)));
+    }));
+  });
+  const worst = async () => {
+    await expect(tv.locator(".superset-flash")).toBeVisible();
+    await tv.waitForTimeout(500); // slid in
+    let most = -Infinity;
+    for (let i = 0; i < 15; i++) { most = Math.max(most, (await spill()) ?? -Infinity); await tv.waitForTimeout(70); }
+    return most;
+  };
+
+  const s = await state(api, ev);
+  const victim = s.guests.find((g) => g.name.startsWith("Jean"));
+  await api.post(`/api/host/events/${ev.id}/guests/${victim.id}/remove`);
+  await expect(tv.locator(".bouche-flash")).toContainText("Jean-Christophe Tremblay has been BOUCHED!");
+  expect(await worst()).toBeLessThanOrEqual(1);
+  await expect(tv.locator(".superset-flash")).toBeHidden({ timeout: 10_000 });
+
+  await api.put("/api/host/appearance", { data: { scheme: "neon" } });
+  await api.post(`/api/host/events/${ev.id}/actions/superset-after`);
+  expect(await worst()).toBeLessThanOrEqual(1);
+});
