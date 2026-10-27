@@ -53,6 +53,10 @@ migrate_legacy_env() {
     "$LEGACY_IMAGE") set_env KQ_IMAGE "parabyte-ca/$PROJECT"; ok "KQ_IMAGE renamed to parabyte-ca/$PROJECT" ;;
     "ghcr.io/parabyte-ca/karaokequeue") set_env KQ_IMAGE "ghcr.io/parabyte-ca/$PROJECT"; ok "KQ_IMAGE renamed to ghcr.io/parabyte-ca/$PROJECT" ;;
   esac
+  # 1.0 enforces the Content-Security-Policy; a .env from 0.16 still says report. Say so, but leave the choice.
+  [[ "$(get_env CSP_MODE)" == "report" ]] && \
+    warn "CSP_MODE=report in .env: 1.0 enforces it by default. Set CSP_MODE=enforce once the TV's browser console is clean."
+  return 0
 }
 port() { local p; p="$(get_env KQ_PORT)"; printf '%s' "${p:-8095}"; }
 puid() { local u; u="$(get_env PUID)"; printf '%s' "${u:-568}"; }

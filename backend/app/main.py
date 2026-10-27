@@ -65,8 +65,8 @@ def push_endpoint_allowed(url: str) -> bool:
         any(host == h or host.endswith("." + h) for h in PUSH_HOSTS)
 
 
-# Report-only by default so a missed source shows in the browser console instead of breaking the TV.
-# Set CSP_MODE=enforce once the console is clean, or off to drop the header.
+# Enforced by default (since 1.0). CSP_MODE=report only logs violations in the browser console, and off drops the
+# header; use report to find a missing source without breaking the TV.
 CSP = ("default-src 'self'; script-src 'self' https://www.youtube.com https://s.ytimg.com; "
        "frame-src https://www.youtube.com https://www.youtube-nocookie.com; "
        "img-src 'self' data: blob: https://i.ytimg.com https://*.ytimg.com; "
@@ -352,7 +352,7 @@ def create_app(settings: Settings | None = None, start_ticker: bool = True,
     app.state.push = pusher
     app.state.limits = limits
 
-    csp_mode = os.getenv("CSP_MODE", "report").strip().lower()
+    csp_mode = os.getenv("CSP_MODE", "enforce").strip().lower()
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):

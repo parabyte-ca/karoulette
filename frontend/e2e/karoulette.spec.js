@@ -755,3 +755,26 @@ test("help page, and the singer and host tours on first visit", async ({ browser
   await phoneCtx.close();
   await ctx.close();
 });
+
+test("no Content-Security-Policy violations on any screen", async ({ browser }) => {
+  const { ctx, ev } = await hostWithEvent(browser, "CSP Night", { themes_enabled: true });
+  const violations = [];
+  const watch = (page) => page.on("console", (m) => {
+    if (/Content Security Policy|Content-Security-Policy/i.test(m.text())) violations.push(`${page.url()}: ${m.text()}`);
+  });
+  ctx.on("page", watch);
+  const phone = await joinPhone(browser, ev, "Alex");
+  watch(phone);
+  await queue(phone, "Africa");
+  const tv = await openTv(ctx, ev);
+  await tv.getByRole("button", { name: "Start event" }).click();
+  for (const path of ["/", "/help", "/host", "/host/admin", `/host/remote/${ev.id}`, `/playlist/${ev.join_code}`, "/history", "/spotify"]) {
+    const page = await ctx.newPage();
+    await page.goto(path);
+    await page.waitForLoadState("networkidle");
+    await page.close();
+  }
+  await phone.reload();
+  await expect(phone.locator(".status-card")).toBeVisible();
+  expect(violations).toEqual([]);
+});
