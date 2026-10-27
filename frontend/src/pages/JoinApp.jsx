@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, guestSession } from "../lib/api";
 import { applyAppearance, useBanner } from "../lib/schemes";
 import { useCountdown, useEventSocket } from "../lib/useEventSocket";
@@ -14,6 +14,24 @@ import { notify, useInstall } from "../lib/pwa";
 import { AlertsOffer, AlertsSettings, useAlerts } from "../components/Alerts";
 import { LikeButton, MyBests, Suggestions } from "../components/Crowd";
 import { ClaimSheet, PastSongs, SingerFooter, SingerWelcome, rememberSinger } from "../components/SingerCode";
+import Tour from "../components/Tour";
+import { markTourSeen, shouldShowTour } from "../lib/tour";
+
+const singerTour = (name) => [
+  { title: `🎤 Welcome, ${name}!`, body: "Here's a quick look around. It takes half a minute, or skip it any time." },
+  { target: '[data-tour="status"]', title: "Your turn at a glance",
+    body: "This card says how many songs are before yours and about how long you'll wait. Tap 🔔 Buzz me to get an alert when you're nearly up, even with your phone locked." },
+  { target: '[data-tour="search"]', title: "Find your song",
+    body: "Type a song or artist, then tap Add. We look for karaoke versions for you. Add as many as you like: everyone sings one song per round, in the order people joined. Once others join, “Sing it” makes it a duet or suggests it to a friend." },
+  { target: '[data-tour="tabs"]', title: "Your songs and the queue",
+    body: "My songs lists your picks: ▲ sings one sooner and ✕ removes it. Queue shows everyone's songs and the singer order. Tap ❤️ to like someone's song." },
+  { target: '[data-tour="cheers"]', optional: true, title: "Cheer them on",
+    body: "While someone sings, tap these to send cheers to the TV." },
+  { target: '[data-tour="rejoin"]', optional: true, title: "Keep this code",
+    body: "Switching phones or battery died? Your rejoin code and the event code get your place and songs back." },
+  { target: '[data-tour="help"]', title: "Questions?", done: "Let's sing!",
+    body: "Help answers the common ones, and you can replay this tour from there. Have fun! 🎶" },
+];
 
 function JoinForm({ initialCode, onJoined }) {
   const [code, setCode] = useState((initialCode || "").toUpperCase());
@@ -118,6 +136,7 @@ function JoinForm({ initialCode, onJoined }) {
         <button type="button" className="btn btn-link btn-block" onClick={() => { setRejoin(!rejoin); setError(""); }}>
           {rejoin ? "New here? Join with your name" : "Switched phones? Rejoin with your code"}
         </button>
+        <Link className="btn btn-link btn-block small" to="/help">❓ How does it work?</Link>
       </form>
     </main>
   );
@@ -192,7 +211,7 @@ function SearchPanel({ canAdd, limitNote, onAdd, push, setPick, partners, sugges
   };
 
   return (
-    <section className="card" ref={panelRef}>
+    <section className="card" ref={panelRef} data-tour="search">
       <form className="search" onSubmit={search} role="search">
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} maxLength={100}
                placeholder="Song or artist" enterKeyHint="search" />
@@ -253,7 +272,7 @@ function ReactionBar({ emojis, push }) {
     catch (e) { if (e.status === 429) push("Easy there! Give the cheers a second.", "info", 2500); }
   };
   return (
-    <div className="reaction-bar" role="group" aria-label="Cheer for the singer">
+    <div className="reaction-bar" role="group" aria-label="Cheer for the singer" data-tour="cheers">
       {emojis.map((e) => (
         // A new key on each tap restarts the pop animation.
         <button key={popped?.startsWith(e) ? popped : e} className={`reaction-btn ${popped?.startsWith(e) ? "popped" : ""}`}
@@ -296,6 +315,7 @@ function GuestHome({ me, onLeave }) {
   const [singer, setSinger] = useState(me.singer || null);
   const [welcome, setWelcome] = useState(!!(me.new || me.code_invalid));
   const [claiming, setClaiming] = useState(false);
+  const [touring, setTouring] = useState(() => shouldShowTour("singer"));
   const singerChanged = (s) => { setSinger(s); rememberSinger(s); };
   const [tab, setTab] = useState("me");
   const [spinMeta, setSpinMeta] = useState({ candidates: [] });
@@ -499,14 +519,14 @@ function GuestHome({ me, onLeave }) {
       {ev.paused && ev.status === "active" && <div className="smoke-banner">🚬 Smoke break! Back in a few.</div>}
       {vote && <VoteCard vote={vote} myId={myId} serverNow={serverNow} push={push} />}
 
-      <nav className="tabs phone-tabs">
+      <nav className="tabs phone-tabs" data-tour="tabs">
         <button className={`tab ${tab === "me" ? "active" : ""}`} onClick={() => setTab("me")}>My songs ({mySongs.length})</button>
         <button className={`tab ${tab === "queue" ? "active" : ""}`} onClick={() => setTab("queue")}>Queue ({state.queue.length})</button>
       </nav>
 
       {tab === "me" && (
         <>
-          <div className={`status-card ${firstIdx === 0 || singingNow ? "your-turn" : ""} ${superset ? "superset" : ""}`}>
+          <div className={`status-card ${firstIdx === 0 || singingNow ? "your-turn" : ""} ${superset ? "superset" : ""}`} data-tour="status">
             <div className={`status-big ${firstIdx === 0 || gettingReady ? "pulse" : ""}`}>{headline}</div>
             {sub && <div className="muted">{sub}</div>}
             {ev.status !== "ended" && !pushPrefs && <AlertsOffer onOn={setPushPrefs} push={push} />}
@@ -663,7 +683,7 @@ function GuestHome({ me, onLeave }) {
 
       <footer className="phone-footer">
         {me.guest.rejoin_code && ev.status !== "ended" && (
-          <p className="rejoin-note small">Your rejoin code: <strong className="rejoin-code">{me.guest.rejoin_code}</strong>
+          <p className="rejoin-note small" data-tour="rejoin">Your rejoin code: <strong className="rejoin-code">{me.guest.rejoin_code}</strong>
             <br /><span className="muted">Switching phones? Use it with the event code to keep your place and songs.</span></p>
         )}
         {ev.status !== "ended" && <a className="btn btn-link" href={`/playlist/${ev.join_code}`}>🎶 Tonight's playlist so far</a>}
@@ -671,12 +691,22 @@ function GuestHome({ me, onLeave }) {
         <SingerFooter singer={singer} push={push} onClaim={() => { setClaiming(true); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
         {canInstall && <button className="btn" onClick={install}>📲 Install Karoulette</button>}
         {iosHint && <p className="muted small">Tip: tap Share, then “Add to Home Screen” to keep Karoulette one tap away.</p>}
+        <p className="help-links" data-tour="help">
+          <Link className="btn btn-link" to="/help">❓ Help</Link>
+          {ev.status !== "ended" && (
+            <button className="btn btn-link" onClick={() => { setTab("me"); setTouring(true); }}>🧭 Show me around</button>
+          )}
+        </p>
         <button className="btn btn-link" onClick={leave}>Leave event</button>
       </footer>
       {state.now_playing && ev.status === "active" && <ReactionBar emojis={state.reactions || []} push={push} />}
       {choosing && (
         <SupersetChooser nowPlaying={state.now_playing} onClose={() => setChoosing(false)} onChoose={callSuperset}
                          note="Everyone else votes; if most say yes, it's on." />
+      )}
+      {touring && ev.status !== "ended" && (
+        <Tour steps={singerTour(me.guest.name)} label="Singer tour"
+              onClose={() => { markTourSeen("singer"); setTouring(false); }} />
       )}
       <Toasts toasts={toasts} />
     </div>

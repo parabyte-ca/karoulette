@@ -73,6 +73,8 @@ WebSocket messages (server → client): `state` (snapshot), `guest_joined`, `gue
 - `/host` — PIN login → Premium checklist (persisted per browser) → event picker/creator → TV screen: player (≈65 % width), now singing, up next, queue, round/theme banner, QR + join URL + code, spin overlay, superset banner. Collapsible host control bar (keyboard shortcuts: Space pause, N skip, S spin).
 - `/host/admin` — themes CRUD, event settings, guest list, quota meter, history + CSV export.
 - `/join` (and `/join/:code`) — name entry → status card ("You're up!" / "3 turns until you"), theme, search + results (thumb, title, channel, duration), queue view with flag button in supersets, leave.
+- `/help` — public FAQ with Singers and Hosts tabs, search, collapsible answers and deep links (`/help#switch`). Content lives in `src/lib/help.js`.
+- Guided tours (`components/Tour.jsx`): spotlight steps on `data-tour` targets, shown once per browser (localStorage `kq_tours_seen`) and replayable from Help: singer tour after the first join, host tour on the event list and on the TV screen. Browsers run by test tools skip them unless `kq_tours` is `on`.
 
 ## 7. Repo layout
 

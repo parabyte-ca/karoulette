@@ -10,8 +10,30 @@ import Recap from "../components/Recap";
 import { SupersetChooser, SupersetLineup } from "../components/Superset";
 import { Toasts, useToasts } from "../components/Toasts";
 import { singers } from "../lib/eta";
+import Tour from "../components/Tour";
+import { markTourSeen, shouldShowTour } from "../lib/tour";
 
 const CHECK_KEY = "kq_premium_checked";
+
+const TV_TOUR = [
+  { title: "📺 This is the TV screen", body: "Put this browser on the TV, full screen (⛶ or F11). Here's what's where: it takes a minute." },
+  { target: '[data-tour="join"]', title: "Guests join here",
+    body: "Guests scan this QR code, or open the address and type the code. When nothing is playing, the big screen shows it too." },
+  { target: '[data-tour="queue"]', title: "The queue",
+    body: "Songs play one per singer per round, in the order people joined. With the controls showing, ⤒ plays a song next and ✕ removes it." },
+  { target: '[data-tour="theme"]', optional: true, title: "Round theme",
+    body: "Each round spins a theme as a suggestion. Switch themes on or off for each event in Host admin." },
+  { target: '[data-tour="controls"]', title: "Your controls",
+    body: "Start the event, pause the queue for a smoke break, skip a song or call a ★ Superset. They hide after a few seconds: move the mouse or press H to bring them back." },
+  { target: '[data-tour="remote"]', title: "Run it from your phone",
+    body: "Scan the code on 📱 Remote to skip, pause and change the volume from anywhere in the room." },
+  { target: '[data-tour="admin"]', title: "Host admin",
+    body: "Event rules (song limits, last call, safe search), singer order, themes, colours, backups and updates." },
+  { target: '[data-tour="help"]', title: "Help is here", done: "Let's go!",
+    body: "❓ lists the keyboard shortcuts, replays this tour and opens the Help page for hosts and singers." },
+];
+const SHORTCUTS = [["Space", "Pause or play the video"], ["N", "Skip the song"], ["G", "Start the song now"],
+  ["P", "Smoke break (pause or resume the queue)"], ["S", "Re-spin the theme"], ["H", "Show or hide the controls"], ["?", "Open this help"]];
 
 function PremiumChecklist({ onContinue }) {
   const items = [
@@ -73,6 +95,8 @@ export default function HostScreen() {
   const [cheers, setCheers] = useState({ itemId: null, count: 0 });
   const [showRemote, setShowRemote] = useState(false);
   const [choosing, setChoosing] = useState(false);
+  const [touring, setTouring] = useState(() => shouldShowTour("host-tv"));
+  const [showHelp, setShowHelp] = useState(false);
   const { toasts, push } = useToasts();
   const playerRef = useRef(null);
   const hideTimer = useRef(null);
@@ -178,6 +202,7 @@ export default function HostScreen() {
       else if (e.key === "h" || e.key === "H") setControlsVisible((v) => !v);
       else if (e.key === "g" || e.key === "G") act("start-now");
       else if (e.key === "p" || e.key === "P") act(pausedRef.current ? "resume-queue" : "pause-queue");
+      else if (e.key === "?") setShowHelp((v) => !v);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -213,9 +238,10 @@ export default function HostScreen() {
   const qrSrc = `/api/public/qr.svg?code=${ev.join_code}`;
   const upNext = state.queue[0];
   const idle = !nowPlaying;
+  const showControls = controlsVisible || touring;
 
   const roundPanel = (
-    <div className={`turn-panel round-panel ${spinning ? "spinning" : ""}`}>
+    <div className={`turn-panel round-panel ${spinning ? "spinning" : ""}`} data-tour="theme">
       <div className="label">{round.number ? `Round ${round.number} theme` : "Theme"}</div>
       {spinning ? (
         <ThemeSpinner spinKey={`${round.number}-${round.spun_at}`} candidates={spinMeta.candidates || themes}
@@ -341,7 +367,7 @@ export default function HostScreen() {
                   {setTheme}
                   <div className="smoke-sub">Waiting for <strong>{waitingFor.name}</strong> to pick a song that fits…</div>
                   <div className="muted">Pick on your phone, or tap “Sit this one out”.</div>
-                  <button className={`btn ${controlsVisible ? "" : "hidden"}`} onClick={() => act("superset-skip-turn")}>
+                  <button className={`btn ${showControls ? "" : "hidden"}`} onClick={() => act("superset-skip-turn")}>
                     ⏭ Skip {waitingFor.name}'s turn</button>
                 </div>
               </div>
@@ -404,7 +430,7 @@ export default function HostScreen() {
           )}
           {sup ? !(idle && setSpinning) && supersetPanel : themesOn && !(idle && spinning) && roundPanel}
 
-          <div className="side-card grow">
+          <div className="side-card grow" data-tour="queue">
             <div className="label">{sup ? "Then the queue" : "Up next · Queue"} ({state.queue.length})</div>
             {!upNext && <div className="muted">Nothing queued yet</div>}
             <ol className="queue">
@@ -423,7 +449,7 @@ export default function HostScreen() {
                       {item.likes > 0 && <span className="like-badge" title="Likes from phones">❤️ {item.likes}</span>}
                     </div>
                   </div>
-                  <div className={`q-actions ${controlsVisible ? "" : "hidden"}`}>
+                  <div className={`q-actions ${showControls ? "" : "hidden"}`}>
                     <button title="Play next" disabled={idx === 0}
                             onClick={() => call(`/api/host/events/${eventId}/queue/${item.id}/play-next`,
                               { method: "POST" })}>⤒</button>
@@ -436,7 +462,7 @@ export default function HostScreen() {
             </ol>
           </div>
 
-          <div className="side-card join-card">
+          <div className="side-card join-card" data-tour="join">
             <img src={qrSrc} alt="Join QR code" />
             <div>
               <div className="label">Join the queue</div>
@@ -450,7 +476,7 @@ export default function HostScreen() {
         </aside>
       </main>
 
-      <footer className={`controls ${controlsVisible ? "" : "hidden"}`}>
+      <footer className={`controls ${showControls ? "" : "hidden"}`} data-tour="controls">
         {ev.status !== "active" && (
           <button className="btn btn-primary" onClick={() => act("start")} disabled={ev.status === "ended"}>▶ Start event</button>
         )}
@@ -470,8 +496,10 @@ export default function HostScreen() {
           ? <button className="btn" onClick={() => act("superset-cancel", superset ? "End the Superset? Picks not sung yet are dropped." : null)}>✖ Cancel superset</button>
           : <button className="btn btn-gold" disabled={ev.status !== "active"} onClick={() => setChoosing(true)}>★ Superset</button>}
         <span className="spacer" />
-        <button className="btn" onClick={() => setShowRemote(true)}>📱 Remote</button>
-        <Link className="btn" to="/host/admin">Admin</Link>
+        <button className="btn" onClick={() => setShowRemote(true)} data-tour="remote">📱 Remote</button>
+        <Link className="btn" to="/host/admin" data-tour="admin">Admin</Link>
+        <button className="btn" onClick={() => setShowHelp(true)} title="Help, shortcuts and tour" aria-label="Help"
+                data-tour="help">❓</button>
         <button className="btn" onClick={() => document.documentElement.requestFullscreen?.()}>⛶</button>
         <button className="btn btn-danger" disabled={ev.status === "ended"}
                 onClick={() => act("end", "End this event for everyone? The queue will be cleared.")}>End event</button>
@@ -492,6 +520,23 @@ export default function HostScreen() {
           </div>
         </div>
       )}
+      {showHelp && (
+        <div className="modal-backdrop" onClick={() => setShowHelp(false)}>
+          <div className="card modal help-modal" role="dialog" aria-label="Help" onClick={(e) => e.stopPropagation()}>
+            <h2>Help</h2>
+            <h3>Keyboard shortcuts</h3>
+            <dl className="shortcuts">
+              {SHORTCUTS.map(([k, what]) => <div key={k}><dt><kbd>{k}</kbd></dt><dd>{what}</dd></div>)}
+            </dl>
+            <div className="row wrap">
+              <button className="btn" onClick={() => { setShowHelp(false); setTouring(true); }}>🧭 Show me around</button>
+              <a className="btn" href="/help?for=host" target="_blank" rel="noreferrer">❓ Help page</a>
+              <button className="btn btn-primary" onClick={() => setShowHelp(false)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {touring && <Tour steps={TV_TOUR} label="TV screen tour" onClose={() => { markTourSeen("host-tv"); setTouring(false); }} />}
       <Toasts toasts={toasts} />
     </div>
   );
