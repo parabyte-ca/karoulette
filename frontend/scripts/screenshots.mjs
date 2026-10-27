@@ -9,7 +9,10 @@ const PIN = process.argv[3] || "1234";
 const OUT = fileURLToPath(new URL("../../docs/screenshots", import.meta.url));
 const b = await chromium.launch();
 const THUMB = '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff3d8b"/><stop offset="1" stop-color="#2bd4ff"/></linearGradient></defs><rect width="320" height="180" fill="url(#g)"/><text x="160" y="105" font-size="56" text-anchor="middle" fill="white">🎤</text></svg>';
-const thumbs = (r) => (/ytimg/.test(r.request().url()) ? r.fulfill({ contentType: "image/svg+xml", body: THUMB }) : r.abort());
+// Match whole hostnames (or their subdomains), never a substring of the URL.
+const onHost = (...hosts) => (url) => hosts.some((h) => url.hostname === h || url.hostname.endsWith(`.${h}`));
+const isThumb = onHost("ytimg.com");
+const thumbs = (r) => (isThumb(new URL(r.request().url())) ? r.fulfill({ contentType: "image/svg+xml", body: THUMB }) : r.abort());
 const shot = (p, name) => p.screenshot({ path: `${OUT}/${name}.jpg`, type: "jpeg", quality: 82 });
 const host = await b.newContext({ viewport: { width: 1600, height: 900 } });
 const api = host.request;
@@ -36,7 +39,7 @@ const recap = await night("Halloween Bash", ["Alex", "Blake", "Casey", "Dana"], 
 const { ev, t } = await night("Friday Night", ["Alex", "Blake", "Casey", "Dana", "Eli"], 2, false, { themes_enabled: true, ready_seconds: 30 });
 
 const tv = await host.newPage();
-await tv.route(/youtube\.com|ytimg\.com|googlevideo\.com/, thumbs);
+await tv.route(onHost("youtube.com", "ytimg.com", "googlevideo.com"), thumbs);
 await tv.goto(`${B}/host/event/${ev.id}`);
 await tv.locator(".checks input").nth(3).waitFor();
 for (const box of await tv.locator(".checks input").all()) await box.check();
@@ -51,7 +54,7 @@ await shot(tv, "tv-recap");
 
 const phoneCtx = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
 await phoneCtx.addInitScript(([tok, c]) => { localStorage.setItem("kq_token", tok); localStorage.setItem("kq_code", c); }, [t.Casey.token, ev.join_code]);
-await phoneCtx.route(/ytimg\.com/, thumbs);
+await phoneCtx.route(isThumb, thumbs);
 const ph = await phoneCtx.newPage();
 await ph.goto(`${B}/join/${ev.join_code}`);
 await ph.locator(".status-card").waitFor();

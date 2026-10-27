@@ -3,6 +3,13 @@
 ## [1.0.0] - 2026-10-27
 Karoulette is stable. Version numbers now follow semantic versioning: patches fix bugs, minor releases add features and upgrade in place, and a major release will say exactly what you need to change.
 
+### Fixed
+- **TV announcements over the video** (BOUCHED!, NEW SINGER!, SUPERSET!):
+  - On **Main Stage, Mirror Ball and Northern Lights**, the video was drawn over the announcement and the TV layout jumped while it showed. The same bug knocked toasts, the Remote, Superset and Help dialogs, and the guided tour on those skins into the page under the video. Fixed.
+  - **BOUCHED!** no longer tilts its ends out of the band; it shakes sideways instead.
+  - Long names and wide skin fonts stay on the solid part of the band, with room above and below, at every TV size from 1024×768 to 4K. Checked on all seven skins over a playing video, and a browser test now guards it.
+- Long singer names no longer run out of the TV's join card.
+
 ### Changed
 - **Content-Security-Policy is enforced by default** (`CSP_MODE=enforce`). `report` (browser console only) and `off` are still there if a screen misbehaves. A new browser test fails if any screen logs a policy violation.
 - **README refreshed**: screenshots of the TV, a phone, the recap, Help and Host admin; a quick start; features grouped by who uses them; upgrade and versioning notes; the architecture section brought up to date.
