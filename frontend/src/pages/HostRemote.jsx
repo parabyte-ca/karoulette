@@ -139,6 +139,7 @@ export default function HostRemote() {
       <footer className="phone-footer row wrap remote-footer">
         <Link className="btn" to="/host/admin">Admin</Link>
         <Link className="btn" to={`/host/event/${eventId}`}>TV screen</Link>
+        <Link className="btn" to="/help?for=host">❓ Help</Link>
         <button className="btn btn-danger" disabled={ev.status === "ended"}
                 onClick={() => act("end", "End this event for everyone? The queue will be cleared.")}>End event</button>
       </footer>

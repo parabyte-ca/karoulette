@@ -392,7 +392,10 @@ export default function HostAdmin() {
             <button className="version-tag update" onClick={() => setTab("updates")}>v{info.update} available</button>
           )}
         </h1>
-        <Link className="btn" to="/host">Back to events</Link>
+        <span className="actions">
+          <Link className="btn" to="/help?for=host">❓ Help</Link>
+          <Link className="btn" to="/host">Back to events</Link>
+        </span>
       </header>
       <nav className="tabs">
         {TABS.map(([k, label]) => (

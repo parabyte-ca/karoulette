@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0] - 2026-10-27
+### Added
+- **Help page** at `/help` (also linked from the landing page, join form, phone footer, TV, remote, event list and Host admin): 61 questions and answers for **singers** (joining, when you'll sing, duets and suggestions, Supersets, alerts on iPhone, switching phones, singer codes, privacy) and **hosts** (first night, YouTube Premium, PIN, QR address, https, shortcuts, remote, no sound, rules, last call, quota, backups, updates). Search box, collapsible answers, and links straight to one answer (`/help#switch`).
+- **Singer tour**: the first time a phone joins, a short spotlight tour shows the status card, search, My songs and Queue, cheers, the rejoin code and Help. Skip any time; replay with **🧭 Show me around** at the bottom of the phone or from Help.
+- **Host tour**: the first visit to the event list points out creating an event, open events, Host admin and Help; the first time a browser opens the TV screen (after the Premium checklist), it walks through the QR code, queue, theme, controls (held open during the tour), remote, admin and help. The TV's shortcuts are paused while the tour is open.
+- **❓ on the TV**: keyboard shortcuts, replay the tour, and the Help page. Press <kbd>?</kbd> to open it.
+
 ## [0.16.0] - 2026-10-25
 ### Security
 - **Real client addresses only from your proxy.** Karoulette used to believe `X-Forwarded-For` from anyone, so a visitor could fake their address and get past the login, join and search limits. It now trusts it only from `KQ_TRUSTED_PROXIES` (default: this host and Docker networks, which covers Cloudflare Tunnel and Nginx Proxy Manager). The address list is logged at start-up.

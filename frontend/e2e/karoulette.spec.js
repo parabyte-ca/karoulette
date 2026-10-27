@@ -683,3 +683,75 @@ test("likes on the queue and TV, a suggested song, then the recap and awards", a
   await expect(guest.locator(".awards")).toContainText("Newest voices");
   await expect(guest.locator(".award-card", { hasText: "Newest voices" })).toContainText("Lou");
 });
+
+test("help page, and the singer and host tours on first visit", async ({ browser }) => {
+  const tours = () => localStorage.setItem("kq_tours", "on"); // test browsers skip tours unless asked
+
+  // Help: search, switch to hosts, and a deep link straight to one answer.
+  const helpCtx = await browser.newContext(PHONE);
+  const help = await helpCtx.newPage();
+  await help.goto("/help");
+  await expect(help.getByRole("heading", { name: "Singing tonight" })).toBeVisible();
+  await help.getByLabel("Search help").fill("duet");
+  await expect(help.locator("details.faq[open] summary").first()).toContainText("duet");
+  await help.getByRole("button", { name: "📺 Hosts" }).click();
+  await help.getByLabel("Search help").fill("forgot PIN");
+  await expect(help.locator("details.faq[open] summary")).toHaveText(["Where's the host PIN? I forgot it"]);
+  await help.goto("/help#switch");
+  await expect(help.locator("#switch")).toHaveAttribute("open", "");
+  await expect(help.locator("#switch")).toContainText("rejoin code");
+
+  // Singer tour: shows once after joining, steps through the phone, and can be replayed.
+  const { ctx, ev } = await hostWithEvent(browser, "Tour Night");
+  const phoneCtx = await phoneContext(browser);
+  await phoneCtx.addInitScript(tours);
+  const phone = await phoneCtx.newPage();
+  await phone.goto(`/join/${ev.join_code}`);
+  await phone.getByPlaceholder("What should the TV call you?").fill("Alex");
+  await phone.getByRole("button", { name: "Join the rotation" }).click();
+  const tour = phone.getByRole("dialog", { name: "Singer tour" });
+  await expect(tour).toContainText("Welcome, Alex!");
+  await tour.getByRole("button", { name: "Next" }).click();
+  await expect(tour).toContainText("Your turn at a glance");
+  await expect(phone.locator(".tour-hole")).toBeVisible();
+  for (let i = 0; i < 4; i++) await tour.getByRole("button", { name: "Next" }).click();
+  await expect(tour).toContainText("Questions?");
+  await tour.getByRole("button", { name: "Let's sing!" }).click();
+  await expect(tour).toBeHidden();
+  await phone.reload();
+  await expect(phone.locator(".status-card")).toBeVisible();
+  await expect(tour).toBeHidden();
+  await phone.getByRole("button", { name: "🧭 Show me around" }).click();
+  await expect(tour).toContainText("Welcome, Alex!");
+  await phone.keyboard.press("Escape");
+  await expect(tour).toBeHidden();
+
+  // Host tour: the event list first, then the TV screen with its controls held open.
+  await ctx.addInitScript(tours);
+  const picker = await ctx.newPage();
+  await picker.goto("/host");
+  const hostTour = picker.getByRole("dialog", { name: "Host tour" });
+  await expect(hostTour).toContainText("Welcome, host!");
+  await hostTour.getByRole("button", { name: "Skip tour" }).click();
+  await expect(hostTour).toBeHidden();
+
+  const tv = await openTv(ctx, ev);
+  const tvTour = tv.getByRole("dialog", { name: "TV screen tour" });
+  await expect(tvTour).toContainText("This is the TV screen");
+  await tv.keyboard.press("n"); // the tour keeps the TV's shortcuts from firing underneath
+  for (let i = 0; i < 3; i++) await tvTour.getByRole("button", { name: "Next" }).click();
+  await expect(tvTour).toContainText("Your controls");
+  await expect(tv.locator("footer.controls")).not.toHaveClass(/hidden/);
+  await tv.waitForTimeout(6500); // longer than the controls take to hide
+  await expect(tv.locator("footer.controls")).not.toHaveClass(/hidden/);
+  for (let i = 0; i < 3; i++) await tvTour.getByRole("button", { name: "Next" }).click();
+  await expect(tvTour).toContainText("Help is here");
+  await tvTour.getByRole("button", { name: "Let's go!" }).click();
+  await expect(tvTour).toBeHidden();
+  await tv.mouse.move(400, 400);
+  await tv.getByRole("button", { name: "Help" }).click();
+  await expect(tv.getByRole("dialog", { name: "Help" })).toContainText("Keyboard shortcuts");
+  await helpCtx.close();
+  await phoneCtx.close();
+  await ctx.close();
+});

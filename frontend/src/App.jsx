@@ -11,6 +11,7 @@ const HostAdmin = lazy(() => import("./pages/HostAdmin"));
 const HistoryPage = lazy(() => import("./pages/HistoryPage"));
 const PlaylistPage = lazy(() => import("./pages/PlaylistPage"));
 const SpotifyPage = lazy(() => import("./pages/SpotifyPage"));
+const HelpPage = lazy(() => import("./pages/HelpPage"));
 
 const loading = <main className="center-page"><p className="muted">Loading…</p></main>;
 const host = (page) => <HostGate><Suspense fallback={loading}>{page}</Suspense></HostGate>;
@@ -24,6 +25,7 @@ function Landing() {
         <Link className="btn btn-primary btn-xl" to="/join">I'm a guest</Link>
         <Link className="btn btn-xl" to="/host">I'm the host</Link>
       </div>
+      <Link className="btn btn-link" to="/help">❓ How does it work?</Link>
     </main>
   );
 }
@@ -36,6 +38,7 @@ export default function App() {
       <Route path="/join/:code" element={<JoinApp />} />
       <Route path="/history" element={<Suspense fallback={loading}><HistoryPage /></Suspense>} />
       <Route path="/playlist/:code" element={<Suspense fallback={loading}><PlaylistPage /></Suspense>} />
+      <Route path="/help" element={<Suspense fallback={loading}><HelpPage /></Suspense>} />
       <Route path="/spotify" element={<Suspense fallback={loading}><SpotifyPage /></Suspense>} />
       <Route path="/host" element={host(<EventPicker />)} />
       <Route path="/host/admin" element={host(<HostAdmin />)} />
