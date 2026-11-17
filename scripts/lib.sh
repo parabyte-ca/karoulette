@@ -18,21 +18,61 @@ ok()   { printf '%s ok%s %s\n' "$C_OK" "$C_END" "$*"; }
 warn() { printf '%s!!%s %s\n' "$C_WARN" "$C_END" "$*" >&2; }
 die()  { printf '%sxx%s %s\n' "$C_ERR" "$C_END" "$*" >&2; exit 1; }
 
-# get_env KEY -> value from .env (empty if missing)
-get_env() {
+# get_env_raw KEY -> the value exactly as written in .env, quotes included (empty if missing)
+get_env_raw() {
   [[ -f "$ENV_FILE" ]] || return 0
   awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); v = $0 } END { print v }' "$ENV_FILE"
 }
 
-# set_env KEY VALUE -> replace or append in .env
+# get_env KEY -> the value Docker Compose will see for a plain or quoted value (surrounding quotes removed)
+get_env() {
+  local v
+  v="$(get_env_raw "$1")"
+  if [[ ${#v} -ge 2 && $v == \'*\' ]]; then
+    v="${v:1:${#v}-2}"
+    v="${v//\\\'/\'}"
+  elif [[ ${#v} -ge 2 && $v == \"*\" ]]; then
+    v="${v:1:${#v}-2}"
+  fi
+  printf '%s' "$v"
+}
+
+# env_line KEY VALUE -> the .env line for it. Docker Compose drops $NAME, cuts at " #" and trims spaces in
+# plain values, so anything beyond letters, digits and ./:,@+=_- goes in single quotes, which it reads as typed.
+env_line() {
+  local key="$1" value="$2"
+  if [[ $value =~ ^[A-Za-z0-9_./:,@+=-]*$ ]]; then
+    printf '%s=%s' "$key" "$value"
+  elif [[ $value == *"'"* || $value == *\\ ]]; then
+    die "$key can't contain a single quote (') or end with a backslash (\\). Choose another value."
+  else
+    printf "%s='%s'" "$key" "$value"
+  fi
+}
+
+# set_env KEY VALUE -> replace or append in .env. The line travels through the environment, not awk -v,
+# which would turn backslash sequences such as \t into other characters.
 set_env() {
-  local key="$1" value="$2" tmp
+  local key="$1" line tmp
+  line="$(env_line "$key" "$2")" || exit 1
   tmp="$(mktemp "${ENV_FILE}.XXXXXX")"
-  awk -F= -v k="$key" -v v="$value" '
-    $1 == k { print k "=" v; found = 1; next } { print }
-    END { if (!found) print k "=" v }' "$ENV_FILE" > "$tmp"
+  KQ_ENV_LINE="$line" awk -F= -v k="$key" '
+    $1 == k { print ENVIRON["KQ_ENV_LINE"]; found = 1; next } { print }
+    END { if (!found) print ENVIRON["KQ_ENV_LINE"] }' "$ENV_FILE" > "$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$ENV_FILE"
+}
+
+# quote_secrets -> put secrets typed without quotes into single quotes, so Docker Compose stops changing them
+# (a "$" in a PIN used to vanish, along with the letters after it).
+quote_secrets() {
+  local key raw
+  for key in HOST_PIN SECRET_KEY YOUTUBE_API_KEY SPOTIFY_CLIENT_ID; do
+    raw="$(get_env_raw "$key")"
+    [[ -z "$raw" || $raw == \'* || $raw == \"* || $raw =~ ^[A-Za-z0-9_./:,@+=-]*$ ]] && continue
+    set_env "$key" "$raw"
+    ok "$key put in single quotes so Docker Compose reads it exactly as typed"
+  done
 }
 
 # abs_path PATH -> absolute path; relative paths are resolved against the repo
@@ -53,6 +93,7 @@ migrate_legacy_env() {
     "$LEGACY_IMAGE") set_env KQ_IMAGE "parabyte-ca/$PROJECT"; ok "KQ_IMAGE renamed to parabyte-ca/$PROJECT" ;;
     "ghcr.io/parabyte-ca/karaokequeue") set_env KQ_IMAGE "ghcr.io/parabyte-ca/$PROJECT"; ok "KQ_IMAGE renamed to ghcr.io/parabyte-ca/$PROJECT" ;;
   esac
+  quote_secrets
 }
 port() { local p; p="$(get_env KQ_PORT)"; printf '%s' "${p:-8095}"; }
 puid() { local u; u="$(get_env PUID)"; printf '%s' "${u:-568}"; }

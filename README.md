@@ -106,7 +106,7 @@ All settings live in `.env` (see `.env.example`).
 | `KQ_PORT` | `8095` | Host port (container listens on 8000) |
 | `KQ_DATA_DIR` | `./data` | Host folder for `karoulette.db` (mounted at `/data`) |
 | `PUID` / `PGID` | `568` | User the container runs as |
-| `HOST_PIN` | _(required)_ | Host PIN or password, 4+ characters (use 8+ or a passphrase if Karoulette is on the internet). When set, it always wins over a PIN changed in admin |
+| `HOST_PIN` | _(required)_ | Host PIN or password, 4+ characters (use 8+ or a passphrase if Karoulette is on the internet). When set, it always wins over a PIN changed in admin. Put symbols such as `$`, `#` or spaces in single quotes: `HOST_PIN='my$ecret pin'` (setup and update do this for you) |
 | `YOUTUBE_API_KEY` | _(blank)_ | YouTube Data API v3 key. Blank = yt-dlp fallback search |
 | `YOUTUBE_DAILY_QUOTA` | `10000` | Daily quota used for the remaining-quota estimate |
 | `SPOTIFY_CLIENT_ID` | _(blank)_ | Optional: the Client ID of your Spotify app, for Spotify playlists (or set it in Host admin → Song history → Playlists) |

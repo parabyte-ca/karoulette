@@ -173,6 +173,11 @@ export const HOST_HELP = [
         "It's `HOST_PIN` in your `.env` file. If it was left blank, Karoulette generated one and saved it in `generated-host-pin.txt` in the data folder.",
         "Change it in Host admin → Security (unless `HOST_PIN` is set, which always wins). Changing it signs out every other screen.",
       ] },
+      { id: "pin-rejected", q: "The right PIN says it doesn't match", a: [
+        "If the PIN has symbols such as `$`, `#` or spaces, put it in single quotes in `.env`, e.g. `HOST_PIN='my$ecret pin'`, then run `docker compose up -d`. Without quotes, Docker Compose drops `$` and the letters after it. `./update.sh` adds the quotes for you.",
+        "The log shows how many characters the app received: `docker logs karoulette 2>&1 | grep \"Host PIN set\"`. Compare that with your PIN.",
+        "After 20 wrong PINs in 15 minutes the login locks for the rest of that window. Wait, or restart the container.",
+      ] },
       { id: "join-address", q: "The QR code shows the wrong address", a: [
         "Set `PUBLIC_BASE_URL` in `.env` to the address guests use, like `https://karaoke.example.ca`, then run `./update.sh`. When it's blank, the QR code uses the address the TV opened.",
       ] },

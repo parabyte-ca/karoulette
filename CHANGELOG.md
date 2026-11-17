@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.17.1] - 2026-11-17
+### Fixed
+- **Host PINs with symbols now work.** Docker Compose drops `$` and the letters after it from unquoted `.env` values, and cuts a value at ` #`.
+  - `setup.sh` now writes such values in single quotes, which Compose reads exactly as typed.
+  - `update.sh` quotes an existing `HOST_PIN`, `SECRET_KEY`, `YOUTUBE_API_KEY` or `SPOTIFY_CLIENT_ID` that was typed without quotes, so a PIN with `$` works again after the next update.
+  - The script that writes `.env` also stopped turning backslash sequences such as `\t` into other characters.
+- The log now shows how many characters the host PIN has (never the PIN), so a mismatch with `.env` is easy to spot. Help has a new "The right PIN says it doesn't match" answer.
+- **TV announcements over the video** (#32): on Main Stage, Mirror Ball and Northern Lights, BOUCHED!, NEW SINGER! and SUPERSET! were drawn under the playing video and the TV layout jumped. Toasts, dialogs and the guided tour on those skins had the same problem. Also:
+  - BOUCHED! shakes sideways instead of tilting out of its band.
+  - Long names and wide skin fonts stay on the solid part of the band at every TV size.
+  - Long singer names wrap inside the TV's join card.
+
+### Upgrade notes
+- If you edited `HOST_PIN` by hand, `./update.sh` (or Host admin → Updates) wraps it in single quotes the first time it runs. Your PIN doesn't change; it starts working as typed.
+
 ## [0.17.0] - 2026-10-27
 ### Added
 - **Help page** at `/help` (also linked from the landing page, join form, phone footer, TV, remote, event list and Host admin): 61 questions and answers for **singers** (joining, when you'll sing, duets and suggestions, Supersets, alerts on iPhone, switching phones, singer codes, privacy) and **hosts** (first night, YouTube Premium, PIN, QR address, https, shortcuts, remote, no sound, rules, last call, quota, backups, updates). Search box, collapsible answers, and links straight to one answer (`/help#switch`).
