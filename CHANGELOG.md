@@ -12,6 +12,9 @@
   - Long names and wide skin fonts stay on the solid part of the band at every TV size.
   - Long singer names wrap inside the TV's join card.
 
+### Security
+- The image installs Debian's fix for a zlib heap overflow (CVE-2026-85091, HIGH). The published `python:3.13-slim` base image doesn't include it yet, and the weekly security scan had been failing on it since 9 November.
+
 ### Upgrade notes
 - If you edited `HOST_PIN` by hand, `./update.sh` (or Host admin → Updates) wraps it in single quotes the first time it runs. Your PIN doesn't change; it starts working as typed.
 
