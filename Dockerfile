@@ -9,7 +9,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---- Stage 2: Python runtime
-FROM python:3.13-slim
+FROM python:3.15-slim
 ARG APP_UID=568
 ARG APP_GID=568
 ENV PYTHONDONTWRITEBYTECODE=1 \
