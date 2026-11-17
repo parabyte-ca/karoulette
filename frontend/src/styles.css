@@ -209,19 +209,22 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 
 .join-card { display: flex; gap: 0.8em; align-items: center; }
 .join-card .join-url { font-size: 0.95em; }
-.join-card > div { min-width: 0; }
+.join-card > div { min-width: 0; overflow-wrap: anywhere; }
 .join-card img { width: 6.5em; height: 6.5em; background: #fff; border-radius: 10px; padding: 0.25em; flex: none; }
 
 .tv .toasts { right: auto; left: 1.5rem; bottom: 5rem; }
 .controls { display: flex; gap: 0.5em; padding: 0.6em 1em; background: var(--chrome-strong); border-top: 1px solid var(--line); flex-wrap: wrap; transition: opacity 0.3s; font-size: 16px; }
 
+/* Announcements over the video. The band is solid from 8% to 92% and the text keeps to the middle 80%, with room
+   above and below, so no letter ever sits on a faded edge or spills onto the video. */
 .superset-flash {
-  position: fixed; z-index: 50; left: 0; right: 0; top: 18%; padding: 1.2em; text-align: center; pointer-events: none;
-  background: linear-gradient(90deg, transparent, var(--highlight) 15%, var(--accent) 85%, transparent);
+  position: fixed; z-index: 50; left: 0; right: 0; top: 18%; padding: 0.8em 1.2em 0.9em; text-align: center; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--highlight) 8%, var(--accent) 92%, transparent);
   color: var(--on-highlight); animation: sweep 4s ease forwards;
 }
-.superset-word { font-size: clamp(3rem, 9vw, 9rem); font-weight: 900; letter-spacing: 0.08em; line-height: 1; }
-.superset-theme { font-size: clamp(1.3rem, 2.6vw, 3rem); font-weight: 800; }
+.superset-word, .superset-theme { max-width: 80vw; margin-inline: auto; overflow-wrap: anywhere; }
+.superset-word { font-size: clamp(2.4rem, min(7vw, 13vh), 8rem); font-weight: 900; letter-spacing: 0.08em; line-height: 1.15; padding-top: 0.08em; }
+.superset-theme { font-size: clamp(1.2rem, min(2.4vw, 4.5vh), 2.8rem); font-weight: 800; line-height: 1.25; margin-top: 0.2em; }
 @keyframes sweep {
   0% { transform: translateX(-110%) skewX(-12deg); }
   12% { transform: translateX(0) skewX(-6deg); }
@@ -336,7 +339,7 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 
 /* ---------- free submission: new singers and rounds */
 .new-tag { margin-left: 0.4em; background: var(--accent-2); color: var(--bg); font-weight: 800; font-size: 0.75em; padding: 0.05em 0.5em; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.05em; }
-.newsinger-flash { background: linear-gradient(90deg, transparent, var(--accent-2) 15%, var(--accent) 85%, transparent); }
+.newsinger-flash { background: linear-gradient(90deg, transparent, var(--accent-2) 8%, var(--accent) 92%, transparent); }
 .round-panel .turn-sub.small { font-size: 0.85em; margin-top: 0.4em; }
 .round-theme { margin-top: 0.8em; padding-top: 0.7em; border-top: 1px solid var(--line); }
 .song-actions { display: flex; flex-direction: column; gap: 0.35em; }
@@ -416,9 +419,10 @@ ol.list.compact { list-style: decimal; padding-left: 1.4em; }
 .vote-tally { font-weight: 700; color: var(--muted); margin: 0.3em 0 0; }
 .call-superset { margin-top: 0.6em; }
 
-.bouche-flash { background: linear-gradient(90deg, transparent, var(--red) 15%, var(--orange) 85%, transparent); color: #1a0500; }
+.bouche-flash { background: linear-gradient(90deg, transparent, var(--red) 8%, var(--orange) 92%, transparent); color: #1a0500; }
+/* A sideways shake: tilting the word swung its ends out of the band and over the video. */
 .bouche-flash .superset-word { animation: bouche 0.5s ease 3; }
-@keyframes bouche { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-4deg) scale(1.05); } 75% { transform: rotate(4deg) scale(1.05); } }
+@keyframes bouche { 0%, 100% { transform: none; } 25% { transform: translateX(-0.06em) scale(1.03); } 75% { transform: translateX(0.06em) scale(1.03); } }
 
 .smoke-break { flex-direction: column; gap: 1em; text-align: center; }
 .smoke-text { background: var(--chrome-strong); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.2em 2.4em; backdrop-filter: blur(6px); }

@@ -29,6 +29,9 @@ main() {
   if [[ "$use_git" == 1 ]]; then
     say "Pulling latest code"
     git_ pull --ff-only
+    # Reload the helpers so fixes that arrive with this update (such as .env quoting) apply now, not next time.
+    # shellcheck source=scripts/lib.sh
+    source "$ROOT_DIR/scripts/lib.sh"
   fi
   VERSION="$(cat VERSION 2>/dev/null || echo latest)"
   migrate_legacy_env

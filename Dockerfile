@@ -20,6 +20,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     FORWARDED_ALLOW_IPS=127.0.0.1
 WORKDIR /app
 
+# Debian security fix the published python:3.13-slim doesn't carry yet (CVE-2026-85091, zlib heap overflow).
+# Drop this once `trivy image python:3.13-slim` stops listing zlib1g.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY backend/requirements.txt ./
 # pip itself isn't needed at run time, and its vendored libraries carry CVEs of their own: remove it.
 RUN pip install --no-cache-dir -r requirements.txt \

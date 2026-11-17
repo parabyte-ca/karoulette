@@ -59,6 +59,8 @@ def init_pin(db: Database, env_pin: str) -> None:
         if not stored or not verify_pin(env_pin, stored):
             db.set_setting("host_pin_hash", hash_pin(validate_pin(env_pin)))
         db.set_setting("host_pin_from_env", True)
+        # The length (never the PIN) shows at a glance whether .env and the app agree.
+        log.info("Host PIN set by HOST_PIN (%d characters).", len(env_pin.strip()))
         if len(env_pin.strip()) < 8:
             log.warning("HOST_PIN is shorter than 8 characters. Use a longer PIN or a passphrase if Karoulette "
                         "is reachable from the internet.")
